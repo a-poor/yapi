@@ -5,3 +5,4 @@ pub mod db;
 pub mod dtypes;
 pub mod postman;
 pub mod tui;
+pub mod vars;
