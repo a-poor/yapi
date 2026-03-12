@@ -115,6 +115,78 @@ pub fn save_to(config: &AppConfig, path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Get a config value by dotted key (e.g. "defaults.workspace").
+/// Returns `Ok(None)` if the section or field is unset.
+pub fn get_value(config: &AppConfig, key: &str) -> Result<Option<String>> {
+    match key {
+        "database.path" => Ok(config.database.as_ref().and_then(|d| d.path.clone())),
+        "defaults.workspace" => Ok(config.defaults.as_ref().and_then(|d| d.workspace.clone())),
+        "defaults.collection" => Ok(config.defaults.as_ref().and_then(|d| d.collection.clone())),
+        "defaults.environment" => Ok(config.defaults.as_ref().and_then(|d| d.environment.clone())),
+        "history.retention_days" => Ok(config
+            .history
+            .as_ref()
+            .and_then(|h| h.retention_days)
+            .map(|v| v.to_string())),
+        _ => anyhow::bail!("unknown config key: {key}"),
+    }
+}
+
+/// Set a config value by dotted key. Initializes parent sections if needed.
+pub fn set_value(config: &mut AppConfig, key: &str, value: &str) -> Result<()> {
+    match key {
+        "database.path" => {
+            config
+                .database
+                .get_or_insert_with(|| DatabaseConfig { path: None })
+                .path = Some(value.to_string());
+        }
+        "defaults.workspace" => {
+            config
+                .defaults
+                .get_or_insert_with(|| DefaultsConfig {
+                    workspace: None,
+                    collection: None,
+                    environment: None,
+                })
+                .workspace = Some(value.to_string());
+        }
+        "defaults.collection" => {
+            config
+                .defaults
+                .get_or_insert_with(|| DefaultsConfig {
+                    workspace: None,
+                    collection: None,
+                    environment: None,
+                })
+                .collection = Some(value.to_string());
+        }
+        "defaults.environment" => {
+            config
+                .defaults
+                .get_or_insert_with(|| DefaultsConfig {
+                    workspace: None,
+                    collection: None,
+                    environment: None,
+                })
+                .environment = Some(value.to_string());
+        }
+        "history.retention_days" => {
+            let days: u32 = value
+                .parse()
+                .with_context(|| format!("invalid u32 value for {key}: {value}"))?;
+            config
+                .history
+                .get_or_insert_with(|| HistoryConfig {
+                    retention_days: None,
+                })
+                .retention_days = Some(days);
+        }
+        _ => anyhow::bail!("unknown config key: {key}"),
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +233,50 @@ mod tests {
 
         let history = loaded.history.unwrap();
         assert_eq!(history.retention_days.unwrap(), 90);
+    }
+
+    #[test]
+    fn test_get_value_unset() {
+        let config = AppConfig::default();
+        assert_eq!(get_value(&config, "defaults.workspace").unwrap(), None);
+        assert_eq!(get_value(&config, "database.path").unwrap(), None);
+        assert_eq!(get_value(&config, "history.retention_days").unwrap(), None);
+    }
+
+    #[test]
+    fn test_get_set_roundtrip() {
+        let mut config = AppConfig::default();
+        set_value(&mut config, "defaults.workspace", "personal").unwrap();
+        assert_eq!(
+            get_value(&config, "defaults.workspace").unwrap().as_deref(),
+            Some("personal")
+        );
+    }
+
+    #[test]
+    fn test_set_retention_days_parses_u32() {
+        let mut config = AppConfig::default();
+        set_value(&mut config, "history.retention_days", "90").unwrap();
+        assert_eq!(
+            get_value(&config, "history.retention_days")
+                .unwrap()
+                .as_deref(),
+            Some("90")
+        );
+    }
+
+    #[test]
+    fn test_set_retention_days_rejects_non_numeric() {
+        let mut config = AppConfig::default();
+        assert!(set_value(&mut config, "history.retention_days", "abc").is_err());
+    }
+
+    #[test]
+    fn test_unknown_key_errors() {
+        let config = AppConfig::default();
+        assert!(get_value(&config, "bad.key").is_err());
+        let mut config2 = AppConfig::default();
+        assert!(set_value(&mut config2, "bad.key", "val").is_err());
     }
 
     #[test]

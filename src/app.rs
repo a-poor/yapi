@@ -156,9 +156,45 @@ impl App {
 
     fn run_conf(self, args: ConfArgs) -> Result<()> {
         match args.cmd {
-            ConfCmds::Show => todo!("conf show"),
-            ConfCmds::Set(_) => todo!("conf set"),
-            ConfCmds::Get(_) => todo!("conf get"),
+            ConfCmds::Show => {
+                // TODO: When --config CLI flag or YAPI_CONFIG env var is added,
+                // update config_file source to reflect the override (e.g. "set via --config"
+                // or "set via $YAPI_CONFIG") instead of always showing "using default".
+                let config_file = conf::config_path();
+                // TODO: When --db CLI flag or YAPI_DB env var is added,
+                // add a source variant here for CLI/env overrides as well.
+                let (db_file, db_source) = match self
+                    .config
+                    .database
+                    .as_ref()
+                    .and_then(|d| d.path.as_ref())
+                {
+                    Some(p) => (PathBuf::from(p), "set in config.toml"),
+                    None => (conf::default_db_path(), "using default"),
+                };
+                println!(
+                    "config_file = {:?} # using default",
+                    config_file.display()
+                );
+                println!("db_file = {:?} # {db_source}", db_file.display());
+                println!();
+                let output = toml::to_string_pretty(&self.config)
+                    .context("failed to serialize config")?;
+                print!("{output}");
+                Ok(())
+            }
+            ConfCmds::Get(args) => {
+                if let Some(value) = conf::get_value(&self.config, &args.key)? {
+                    println!("{value}");
+                }
+                Ok(())
+            }
+            ConfCmds::Set(args) => {
+                let mut config = self.config;
+                conf::set_value(&mut config, &args.key, &args.value)?;
+                conf::save(&config)?;
+                Ok(())
+            }
         }
     }
 }
