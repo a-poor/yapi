@@ -21,3 +21,6 @@ spinners = "4.2.0"
 tokio = { version = "1.50.0", features = ["full"] }
 toml = "1.0.6"
 uuid = { version = "1.22.0", features = ["v7", "v4"] }
+
+[dev-dependencies]
+tempfile = "3"
