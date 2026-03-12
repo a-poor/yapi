@@ -5,5 +5,5 @@ use yapi::cli::Cli;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    App::new()?.run(cli)
+    App::new(None)?.run(cli)
 }

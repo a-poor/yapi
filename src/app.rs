@@ -16,38 +16,51 @@ pub struct App {
 }
 
 impl App {
-    /// Production constructor using real environment and default paths.
-    pub fn new() -> Result<Self> {
-        Self::create(&RealEnv, None, None)
+    /// Production constructor. Accepts an optional config path override (e.g. from `--config`).
+    pub fn new(config_path: Option<PathBuf>) -> Result<Self> {
+        Self::new_with_env(&RealEnv, config_path)
     }
 
-    /// Testable constructor with full control over environment and paths.
-    pub fn create(
-        env: &dyn Env,
-        config_path: Option<PathBuf>,
-        db_path: Option<PathBuf>,
-    ) -> Result<Self> {
-        let config_path = config_path.unwrap_or_else(|| conf::config_path_with(env));
-        let config = conf::load_from(&config_path)?;
+    /// Testable constructor with a custom `Env` and optional config path override.
+    pub fn new_with_env(env: &dyn Env, config_path: Option<PathBuf>) -> Result<Self> {
+        let config = Self::load_config(env, config_path.as_deref())?;
+        let db = Self::connect_db(env, &config)?;
+        Ok(Self { config, db })
+    }
 
-        let db_path = db_path
-            .or_else(|| {
-                config
-                    .database
-                    .as_ref()
-                    .and_then(|d| d.path.as_ref())
-                    .map(PathBuf::from)
-            })
+    /// Load config from the given path, or fall back to the env-derived default path.
+    /// Returns `AppConfig::default()` if the file doesn't exist.
+    fn load_config(env: &dyn Env, config_path: Option<&std::path::Path>) -> Result<AppConfig> {
+        let path = match config_path {
+            Some(p) => p.to_path_buf(),
+            None => conf::config_path_with(env),
+        };
+        conf::load_from(&path)
+    }
+
+    /// Open (and migrate) the database. Resolution order:
+    /// 1. `config.database.path` from the loaded config
+    /// 2. `default_db_path_with(env)` fallback
+    fn connect_db(env: &dyn Env, config: &AppConfig) -> Result<DBClient> {
+        let db_path = config
+            .database
+            .as_ref()
+            .and_then(|d| d.path.as_ref())
+            .map(PathBuf::from)
             .unwrap_or_else(|| conf::default_db_path_with(env));
 
         if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create database directory: {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create database directory: {}",
+                    parent.display()
+                )
+            })?;
         }
+
         let db = DBClient::new(Some(db_path.to_str().expect("invalid db path")))?;
         db.migrate()?;
-
-        Ok(Self { config, db })
+        Ok(db)
     }
 
     /// Dispatch CLI commands to handler methods.
@@ -164,13 +177,15 @@ mod tests {
     }
 
     #[test]
-    fn test_create_with_missing_config_uses_defaults() {
+    fn test_missing_config_uses_defaults() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
         let config_path = dir.path().join("nonexistent").join("config.toml");
 
-        let env = FakeEnv(HashMap::new());
-        let app = App::create(&env, Some(config_path), Some(db_path)).unwrap();
+        let env = FakeEnv(HashMap::from([(
+            "HOME".into(),
+            dir.path().to_str().unwrap().into(),
+        )]));
+        let app = App::new_with_env(&env, Some(config_path)).unwrap();
 
         assert!(app.config.database.is_none());
         assert!(app.config.defaults.is_none());
@@ -178,17 +193,50 @@ mod tests {
     }
 
     #[test]
-    fn test_create_with_explicit_db_path() {
+    fn test_config_db_path_used() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("explicit.db");
+
+        // Write a config that specifies a db path
+        let db_path = dir.path().join("from-config.db");
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            format!("[database]\npath = {:?}\n", db_path.to_str().unwrap()),
+        )
+        .unwrap();
+
+        let env = FakeEnv(HashMap::from([(
+            "HOME".into(),
+            dir.path().to_str().unwrap().into(),
+        )]));
+        let app = App::new_with_env(&env, Some(config_path)).unwrap();
+
+        assert!(db_path.exists());
+        assert_eq!(
+            app.config.database.unwrap().path.unwrap(),
+            db_path.to_str().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_default_db_path_fallback() {
+        let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
 
-        let env = FakeEnv(HashMap::new());
-        let app = App::create(&env, Some(config_path), Some(db_path.clone())).unwrap();
+        let env = FakeEnv(HashMap::from([(
+            "HOME".into(),
+            dir.path().to_str().unwrap().into(),
+        )]));
+        let app = App::new_with_env(&env, Some(config_path)).unwrap();
 
-        // DB should have been created at the explicit path
-        assert!(db_path.exists());
-        // Config should be defaults since file doesn't exist
+        // Should have created the db at the default XDG path under HOME
+        let expected = dir
+            .path()
+            .join(".local")
+            .join("share")
+            .join("yapi")
+            .join("yapi.db");
+        assert!(expected.exists());
         assert!(app.config.database.is_none());
     }
 }
