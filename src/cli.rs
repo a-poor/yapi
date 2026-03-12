@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(version, about, long_about)]
 pub struct Cli {
     #[command(subcommand)]
-    cmd: RootCmds,
+    pub cmd: RootCmds,
 }
 
 #[derive(Debug, Subcommand)]
@@ -38,7 +38,7 @@ pub enum RootCmds {
 #[derive(Debug, Args)]
 pub struct ReqArgs {
     #[command(subcommand)]
-    cmd: ReqCmds,
+    pub cmd: ReqCmds,
 }
 
 #[derive(Debug, Subcommand)]
@@ -167,7 +167,7 @@ pub struct ReqDelArgs {
 #[derive(Debug, Args)]
 pub struct CollArgs {
     #[command(subcommand)]
-    cmd: CollCmds,
+    pub cmd: CollCmds,
 }
 
 #[derive(Debug, Subcommand)]
@@ -247,7 +247,7 @@ pub struct CollDelArgs {
 #[derive(Debug, Args)]
 pub struct EnvArgs {
     #[command(subcommand)]
-    cmd: EnvCmds,
+    pub cmd: EnvCmds,
 }
 
 #[derive(Debug, Subcommand)]
@@ -329,7 +329,7 @@ pub struct EnvDelArgs {
 #[derive(Debug, Args)]
 pub struct EnvVarArgs {
     #[command(subcommand)]
-    cmd: EnvVarCmds,
+    pub cmd: EnvVarCmds,
 }
 
 #[derive(Debug, Subcommand)]
@@ -435,7 +435,7 @@ pub struct EnvVarDelArgs {
 #[derive(Debug, Args)]
 pub struct WorkArgs {
     #[command(subcommand)]
-    cmd: WorkCmds,
+    pub cmd: WorkCmds,
 }
 
 #[derive(Debug, Subcommand)]
@@ -500,7 +500,7 @@ pub struct WorkDelArgs {
 #[derive(Debug, Args)]
 pub struct HistArgs {
     #[command(subcommand)]
-    cmd: HistCmds,
+    pub cmd: HistCmds,
 }
 
 #[derive(Debug, Subcommand)]
@@ -549,7 +549,7 @@ pub struct HistDelArgs {
 #[derive(Debug, Args)]
 pub struct ConfArgs {
     #[command(subcommand)]
-    cmd: ConfCmds,
+    pub cmd: ConfCmds,
 }
 
 #[derive(Debug, Subcommand)]

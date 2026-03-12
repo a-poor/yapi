@@ -6,6 +6,20 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+/// Abstraction over environment variable access for testability.
+pub trait Env {
+    fn get(&self, key: &str) -> Option<String>;
+}
+
+/// Production implementation that reads real environment variables.
+pub struct RealEnv;
+
+impl Env for RealEnv {
+    fn get(&self, key: &str) -> Option<String> {
+        std::env::var(key).ok()
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     pub database: Option<DatabaseConfig>,
@@ -30,29 +44,41 @@ pub struct HistoryConfig {
     pub retention_days: Option<u32>,
 }
 
-/// Returns the path to the global config file.
-///
-/// Uses `$XDG_CONFIG_HOME/yapi/config.toml` if set,
-/// otherwise `$HOME/.config/yapi/config.toml`.
-pub fn config_path() -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME")
+/// Returns the config path using the given `Env` for variable lookups.
+pub fn config_path_with(env: &dyn Env) -> PathBuf {
+    let base = env
+        .get("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").expect("HOME not set");
+        .unwrap_or_else(|| {
+            let home = env.get("HOME").expect("HOME not set");
             PathBuf::from(home).join(".config")
         });
     base.join("yapi").join("config.toml")
 }
 
-/// Returns the default database path: `~/.local/share/yapi/yapi.db`.
-pub fn default_db_path() -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME")
+/// Returns the path to the global config file.
+///
+/// Uses `$XDG_CONFIG_HOME/yapi/config.toml` if set,
+/// otherwise `$HOME/.config/yapi/config.toml`.
+pub fn config_path() -> PathBuf {
+    config_path_with(&RealEnv)
+}
+
+/// Returns the default database path using the given `Env` for variable lookups.
+pub fn default_db_path_with(env: &dyn Env) -> PathBuf {
+    let base = env
+        .get("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            let home = std::env::var("HOME").expect("HOME not set");
+        .unwrap_or_else(|| {
+            let home = env.get("HOME").expect("HOME not set");
             PathBuf::from(home).join(".local").join("share")
         });
     base.join("yapi").join("yapi.db")
+}
+
+/// Returns the default database path: `~/.local/share/yapi/yapi.db`.
+pub fn default_db_path() -> PathBuf {
+    default_db_path_with(&RealEnv)
 }
 
 /// Load the global config file. Returns defaults if the file doesn't exist.

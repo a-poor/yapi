@@ -1,27 +1,9 @@
-// use anyhow::Result;
-// use ratatui::{DefaultTerminal, Frame};
-
-// fn main() -> Result<()> {
-//     ratatui::run(app)?;
-//     Ok(())
-// }
-
-// fn app(terminal: &mut DefaultTerminal) -> std::io::Result<()> {
-//     loop {
-//         terminal.draw(render)?;
-//         if crossterm::event::read()?.is_key_press() {
-//             break Ok(());
-//         }
-//     }
-// }
-
-// fn render(frame: &mut Frame) {
-//     frame.render_widget("hello world", frame.area());
-// }
-
+use anyhow::Result;
 use clap::Parser;
+use yapi::app::App;
 use yapi::cli::Cli;
 
-fn main() {
-    let _cli = Cli::parse();
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    App::new()?.run(cli)
 }
