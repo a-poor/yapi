@@ -122,16 +122,25 @@ impl DBClient {
             rusqlite::params![name, description, id],
         )?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "workspace", id }.into());
+            return Err(NotFoundError {
+                entity: "workspace",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
 
     pub fn delete_workspace(&self, id: i64) -> Result<()> {
-        let rows = self.conn
+        let rows = self
+            .conn
             .execute("DELETE FROM workspaces WHERE id = ?1", [id])?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "workspace", id }.into());
+            return Err(NotFoundError {
+                entity: "workspace",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
@@ -176,7 +185,11 @@ impl DBClient {
         }
     }
 
-    pub fn get_environment_by_name(&self, workspace_id: i64, name: &str) -> Result<Option<Environment>> {
+    pub fn get_environment_by_name(
+        &self,
+        workspace_id: i64,
+        name: &str,
+    ) -> Result<Option<Environment>> {
         match self.conn.query_row(
             "SELECT id, workspace_id, name, description, created_at, updated_at FROM environments WHERE workspace_id = ?1 AND name = ?2",
             rusqlite::params![workspace_id, name],
@@ -217,16 +230,25 @@ impl DBClient {
             rusqlite::params![name, description, id],
         )?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "environment", id }.into());
+            return Err(NotFoundError {
+                entity: "environment",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
 
     pub fn delete_environment(&self, id: i64) -> Result<()> {
-        let rows = self.conn
+        let rows = self
+            .conn
             .execute("DELETE FROM environments WHERE id = ?1", [id])?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "environment", id }.into());
+            return Err(NotFoundError {
+                entity: "environment",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
@@ -322,16 +344,25 @@ impl DBClient {
             rusqlite::params![name, value, is_secret, id],
         )?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "environment_var", id }.into());
+            return Err(NotFoundError {
+                entity: "environment_var",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
 
     pub fn delete_environment_var(&self, id: i64) -> Result<()> {
-        let rows = self.conn
+        let rows = self
+            .conn
             .execute("DELETE FROM environment_vars WHERE id = ?1", [id])?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "environment_var", id }.into());
+            return Err(NotFoundError {
+                entity: "environment_var",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
@@ -376,7 +407,11 @@ impl DBClient {
         }
     }
 
-    pub fn get_collection_by_name(&self, workspace_id: i64, name: &str) -> Result<Option<Collection>> {
+    pub fn get_collection_by_name(
+        &self,
+        workspace_id: i64,
+        name: &str,
+    ) -> Result<Option<Collection>> {
         match self.conn.query_row(
             "SELECT id, workspace_id, name, description, created_at, updated_at FROM collections WHERE workspace_id = ?1 AND name = ?2",
             rusqlite::params![workspace_id, name],
@@ -417,16 +452,25 @@ impl DBClient {
             rusqlite::params![name, description, id],
         )?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "collection", id }.into());
+            return Err(NotFoundError {
+                entity: "collection",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
 
     pub fn delete_collection(&self, id: i64) -> Result<()> {
-        let rows = self.conn
+        let rows = self
+            .conn
             .execute("DELETE FROM collections WHERE id = ?1", [id])?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "collection", id }.into());
+            return Err(NotFoundError {
+                entity: "collection",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
@@ -522,16 +566,25 @@ impl DBClient {
             rusqlite::params![name, value, is_secret, id],
         )?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "collection_var", id }.into());
+            return Err(NotFoundError {
+                entity: "collection_var",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
 
     pub fn delete_collection_var(&self, id: i64) -> Result<()> {
-        let rows = self.conn
+        let rows = self
+            .conn
             .execute("DELETE FROM collection_vars WHERE id = ?1", [id])?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "collection_var", id }.into());
+            return Err(NotFoundError {
+                entity: "collection_var",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
@@ -632,16 +685,25 @@ impl DBClient {
             rusqlite::params![name, method, url, body, id],
         )?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "request", id }.into());
+            return Err(NotFoundError {
+                entity: "request",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
 
     pub fn delete_request(&self, id: i64) -> Result<()> {
-        let rows = self.conn
+        let rows = self
+            .conn
             .execute("DELETE FROM requests WHERE id = ?1", [id])?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "request", id }.into());
+            return Err(NotFoundError {
+                entity: "request",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
@@ -706,16 +768,25 @@ impl DBClient {
             rusqlite::params![hkey, hval, id],
         )?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "request_header", id }.into());
+            return Err(NotFoundError {
+                entity: "request_header",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
 
     pub fn delete_request_header(&self, id: i64) -> Result<()> {
-        let rows = self.conn
+        let rows = self
+            .conn
             .execute("DELETE FROM request_headers WHERE id = ?1", [id])?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "request_header", id }.into());
+            return Err(NotFoundError {
+                entity: "request_header",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
@@ -780,16 +851,25 @@ impl DBClient {
             rusqlite::params![qkey, qval, id],
         )?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "request_query_param", id }.into());
+            return Err(NotFoundError {
+                entity: "request_query_param",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
 
     pub fn delete_request_query_param(&self, id: i64) -> Result<()> {
-        let rows = self.conn
+        let rows = self
+            .conn
             .execute("DELETE FROM request_query_params WHERE id = ?1", [id])?;
         if rows == 0 {
-            return Err(NotFoundError { entity: "request_query_param", id }.into());
+            return Err(NotFoundError {
+                entity: "request_query_param",
+                id,
+            }
+            .into());
         }
         Ok(())
     }
@@ -849,11 +929,17 @@ mod tests {
         assert_eq!(ws.description, "a test workspace");
 
         // Get by name
-        let ws2 = db.get_workspace_by_name("test-ws").unwrap().expect("workspace not found");
+        let ws2 = db
+            .get_workspace_by_name("test-ws")
+            .unwrap()
+            .expect("workspace not found");
         assert_eq!(ws2.id, ws.id);
 
         // Get by id
-        let ws3 = db.get_workspace_by_id(ws.id).unwrap().expect("workspace not found");
+        let ws3 = db
+            .get_workspace_by_id(ws.id)
+            .unwrap()
+            .expect("workspace not found");
         assert_eq!(ws3.name, "test-ws");
 
         // Get non-existent returns None
@@ -867,7 +953,10 @@ mod tests {
         // Update
         db.update_workspace(ws.id, "renamed-ws", "updated desc")
             .unwrap();
-        let ws4 = db.get_workspace_by_id(ws.id).unwrap().expect("workspace not found");
+        let ws4 = db
+            .get_workspace_by_id(ws.id)
+            .unwrap()
+            .expect("workspace not found");
         assert_eq!(ws4.name, "renamed-ws");
         assert_eq!(ws4.description, "updated desc");
 
@@ -888,7 +977,10 @@ mod tests {
     #[test]
     fn test_collection_crud() {
         let db = setup();
-        let ws = db.get_workspace_by_name("default").unwrap().expect("workspace not found");
+        let ws = db
+            .get_workspace_by_name("default")
+            .unwrap()
+            .expect("workspace not found");
 
         // Create
         let coll = db
@@ -898,7 +990,10 @@ mod tests {
         assert_eq!(coll.workspace_id, ws.id);
 
         // Get by name
-        let coll2 = db.get_collection_by_name(ws.id, "my-collection").unwrap().expect("collection not found");
+        let coll2 = db
+            .get_collection_by_name(ws.id, "my-collection")
+            .unwrap()
+            .expect("collection not found");
         assert_eq!(coll2.id, coll.id);
 
         // Get non-existent returns None
@@ -911,7 +1006,10 @@ mod tests {
         // Update
         db.update_collection(coll.id, "renamed-coll", "new desc")
             .unwrap();
-        let coll3 = db.get_collection_by_id(coll.id).unwrap().expect("collection not found");
+        let coll3 = db
+            .get_collection_by_id(coll.id)
+            .unwrap()
+            .expect("collection not found");
         assert_eq!(coll3.name, "renamed-coll");
 
         // Update non-existent returns NotFoundError
@@ -931,7 +1029,10 @@ mod tests {
     #[test]
     fn test_request_crud() {
         let db = setup();
-        let ws = db.get_workspace_by_name("default").unwrap().expect("workspace not found");
+        let ws = db
+            .get_workspace_by_name("default")
+            .unwrap()
+            .expect("workspace not found");
         let coll = db.create_collection(ws.id, "coll", "").unwrap();
 
         // Create
@@ -949,7 +1050,10 @@ mod tests {
         assert!(req.body.is_none());
 
         // Get by name
-        let req2 = db.get_request_by_name(coll.id, "get-users").unwrap().expect("request not found");
+        let req2 = db
+            .get_request_by_name(coll.id, "get-users")
+            .unwrap()
+            .expect("request not found");
         assert_eq!(req2.id, req.id);
 
         // Get non-existent returns None
@@ -968,13 +1072,18 @@ mod tests {
             Some("{\"name\":\"test\"}"),
         )
         .unwrap();
-        let req3 = db.get_request_by_id(req.id).unwrap().expect("request not found");
+        let req3 = db
+            .get_request_by_id(req.id)
+            .unwrap()
+            .expect("request not found");
         assert_eq!(req3.name, "create-user");
         assert_eq!(req3.method, "POST");
         assert_eq!(req3.body.as_deref(), Some("{\"name\":\"test\"}"));
 
         // Update non-existent returns NotFoundError
-        let err = db.update_request(9999, "x", "GET", "http://x", None).unwrap_err();
+        let err = db
+            .update_request(9999, "x", "GET", "http://x", None)
+            .unwrap_err();
         assert!(err.downcast_ref::<NotFoundError>().is_some());
 
         // Delete

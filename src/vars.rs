@@ -7,8 +7,7 @@ use regex::Regex;
 
 use crate::dtypes::{Request, RequestHeader, RequestQueryParam, Variable};
 
-static VAR_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{\{\s*([\w]+)\s*\}\}").unwrap());
+static VAR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{\{\s*([\w]+)\s*\}\}").unwrap());
 
 #[derive(Debug)]
 pub struct UndefinedVarsError {
@@ -82,11 +81,11 @@ pub fn resolve_request(
     };
     let mut resolved_headers = Vec::with_capacity(headers.len());
     for h in headers {
-        resolved_headers.push((fill(&h.hkey, vars)?, fill(&h.hval, vars)?));
+        resolved_headers.push((h.hkey.clone(), fill(&h.hval, vars)?));
     }
     let mut resolved_qp = Vec::with_capacity(query_params.len());
     for qp in query_params {
-        resolved_qp.push((fill(&qp.qkey, vars)?, fill(&qp.qval, vars)?));
+        resolved_qp.push((qp.qkey.clone(), fill(&qp.qval, vars)?));
     }
     Ok(ResolvedRequest {
         url,
@@ -102,7 +101,10 @@ mod tests {
     use chrono::NaiveDateTime;
 
     fn vars(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     fn make_variable(name: &str, value: &str) -> Variable {
@@ -133,13 +135,19 @@ mod tests {
     #[test]
     fn basic_substitution() {
         let v = vars(&[("host", "example.com")]);
-        assert_eq!(fill("https://{{ host }}/api", &v).unwrap(), "https://example.com/api");
+        assert_eq!(
+            fill("https://{{ host }}/api", &v).unwrap(),
+            "https://example.com/api"
+        );
     }
 
     #[test]
     fn multiple_vars() {
         let v = vars(&[("host", "example.com"), ("port", "8080")]);
-        assert_eq!(fill("{{ host }}:{{ port }}", &v).unwrap(), "example.com:8080");
+        assert_eq!(
+            fill("{{ host }}:{{ port }}", &v).unwrap(),
+            "example.com:8080"
+        );
     }
 
     #[test]
@@ -223,8 +231,14 @@ mod tests {
         let resolved = resolve_request(&req, &headers, &qps, &v).unwrap();
         assert_eq!(resolved.url, "https://example.com/api");
         assert_eq!(resolved.body.unwrap(), r#"{"token":"abc"}"#);
-        assert_eq!(resolved.headers[0], ("Authorization".to_string(), "Bearer abc".to_string()));
-        assert_eq!(resolved.query_params[0], ("host".to_string(), "example.com".to_string()));
+        assert_eq!(
+            resolved.headers[0],
+            ("Authorization".to_string(), "Bearer abc".to_string())
+        );
+        assert_eq!(
+            resolved.query_params[0],
+            ("host".to_string(), "example.com".to_string())
+        );
     }
 
     #[test]
