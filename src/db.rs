@@ -873,6 +873,93 @@ impl DBClient {
         }
         Ok(())
     }
+    // ── History ─────────────────────────────────────────────────
+
+    pub fn list_history(&self, req_id: i64) -> Result<Vec<HistoryEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, req_id, method, resolved_url, resolved_req_headers, resolved_req_body, success, res_status, res_body, res_headers, res_duration, created_at, updated_at FROM history WHERE req_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([req_id], |row| {
+            Ok(HistoryEntry {
+                id: row.get(0)?,
+                req_id: row.get(1)?,
+                method: row.get(2)?,
+                resolved_url: row.get(3)?,
+                resolved_req_headers: row.get(4)?,
+                resolved_req_body: row.get(5)?,
+                success: row.get(6)?,
+                res_status: row.get(7)?,
+                res_body: row.get(8)?,
+                res_headers: row.get(9)?,
+                res_duration: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn get_history_by_id(&self, id: i64) -> Result<Option<HistoryEntry>> {
+        match self.conn.query_row(
+            "SELECT id, req_id, method, resolved_url, resolved_req_headers, resolved_req_body, success, res_status, res_body, res_headers, res_duration, created_at, updated_at FROM history WHERE id = ?1",
+            [id],
+            |row| {
+                Ok(HistoryEntry {
+                    id: row.get(0)?,
+                    req_id: row.get(1)?,
+                    method: row.get(2)?,
+                    resolved_url: row.get(3)?,
+                    resolved_req_headers: row.get(4)?,
+                    resolved_req_body: row.get(5)?,
+                    success: row.get(6)?,
+                    res_status: row.get(7)?,
+                    res_body: row.get(8)?,
+                    res_headers: row.get(9)?,
+                    res_duration: row.get(10)?,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
+                })
+            },
+        ) {
+            Ok(h) => Ok(Some(h)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub fn create_history(&self, entry: &CreateHistoryEntry) -> Result<HistoryEntry> {
+        self.conn.execute(
+            "INSERT INTO history (req_id, method, resolved_url, resolved_req_headers, resolved_req_body, success, res_status, res_body, res_headers, res_duration) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                entry.req_id,
+                entry.method,
+                entry.resolved_url,
+                entry.resolved_req_headers,
+                entry.resolved_req_body,
+                entry.success,
+                entry.res_status,
+                entry.res_body,
+                entry.res_headers,
+                entry.res_duration,
+            ],
+        )?;
+        self.get_history_by_id(self.conn.last_insert_rowid())?
+            .ok_or_else(|| anyhow::anyhow!("failed to retrieve newly created history entry"))
+    }
+
+    pub fn delete_history(&self, id: i64) -> Result<()> {
+        let rows = self
+            .conn
+            .execute("DELETE FROM history WHERE id = ?1", [id])?;
+        if rows == 0 {
+            return Err(NotFoundError {
+                entity: "history",
+                id,
+            }
+            .into());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1046,7 +1133,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(req.name, "get-users");
-        assert_eq!(req.method, "GET");
+        assert_eq!(req.method, Method::GET);
         assert!(req.body.is_none());
 
         // Get by name
@@ -1077,7 +1164,7 @@ mod tests {
             .unwrap()
             .expect("request not found");
         assert_eq!(req3.name, "create-user");
-        assert_eq!(req3.method, "POST");
+        assert_eq!(req3.method, Method::POST);
         assert_eq!(req3.body.as_deref(), Some("{\"name\":\"test\"}"));
 
         // Update non-existent returns NotFoundError
@@ -1093,6 +1180,66 @@ mod tests {
 
         // Delete non-existent returns NotFoundError
         let err = db.delete_request(req.id).unwrap_err();
+        assert!(err.downcast_ref::<NotFoundError>().is_some());
+    }
+
+    #[test]
+    fn test_history_crud() {
+        let db = setup();
+        let ws = db
+            .get_workspace_by_name("default")
+            .unwrap()
+            .expect("workspace not found");
+        let coll = db.create_collection(ws.id, "coll", "").unwrap();
+        let req = db
+            .create_request(coll.id, "test-req", "GET", "https://example.com", None)
+            .unwrap();
+
+        // Create
+        let entry = CreateHistoryEntry {
+            req_id: Some(req.id),
+            method: "GET".to_string(),
+            resolved_url: "https://example.com".to_string(),
+            resolved_req_headers: "[]".to_string(),
+            resolved_req_body: None,
+            success: true,
+            res_status: Some(200),
+            res_body: Some("{\"ok\":true}".to_string()),
+            res_headers: "[{\"key\":\"content-type\",\"value\":\"application/json\"}]".to_string(),
+            res_duration: Some(0.123),
+        };
+        let hist = db.create_history(&entry).unwrap();
+        assert_eq!(hist.method, "GET");
+        assert_eq!(hist.resolved_url, "https://example.com");
+        assert_eq!(hist.req_id, Some(req.id));
+        assert!(hist.success);
+        assert_eq!(hist.res_status, Some(200));
+        assert_eq!(hist.res_body.as_deref(), Some("{\"ok\":true}"));
+        assert_eq!(hist.res_duration, Some(0.123));
+
+        // Get by id
+        let hist2 = db
+            .get_history_by_id(hist.id)
+            .unwrap()
+            .expect("history not found");
+        assert_eq!(hist2.id, hist.id);
+        assert_eq!(hist2.method, "GET");
+
+        // Get non-existent returns None
+        assert!(db.get_history_by_id(9999).unwrap().is_none());
+
+        // List
+        let entries = db.list_history(req.id).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, hist.id);
+
+        // Delete
+        db.delete_history(hist.id).unwrap();
+        let entries = db.list_history(req.id).unwrap();
+        assert_eq!(entries.len(), 0);
+
+        // Delete non-existent returns NotFoundError
+        let err = db.delete_history(hist.id).unwrap_err();
         assert!(err.downcast_ref::<NotFoundError>().is_some());
     }
 }

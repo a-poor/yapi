@@ -2,6 +2,50 @@ use chrono::NaiveDateTime;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderEntry {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug)]
+pub struct HttpResponse {
+    pub status: u16,
+    pub headers: Vec<HeaderEntry>,
+    pub body: Option<String>,
+    pub duration_secs: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: i64,
+    pub req_id: Option<i64>,
+    pub method: String,
+    pub resolved_url: String,
+    pub resolved_req_headers: String,
+    pub resolved_req_body: Option<String>,
+    pub success: bool,
+    pub res_status: Option<u16>,
+    pub res_body: Option<String>,
+    pub res_headers: String,
+    pub res_duration: Option<f64>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+}
+
+pub struct CreateHistoryEntry {
+    pub req_id: Option<i64>,
+    pub method: String,
+    pub resolved_url: String,
+    pub resolved_req_headers: String,
+    pub resolved_req_body: Option<String>,
+    pub success: bool,
+    pub res_status: Option<u16>,
+    pub res_body: Option<String>,
+    pub res_headers: String,
+    pub res_duration: Option<f64>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Workspace {
     pub id: i64,
@@ -43,7 +87,7 @@ pub struct Collection {
     pub updated_at: NaiveDateTime,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Method {
     GET,
     POST,
@@ -101,6 +145,22 @@ impl FromSql for Method {
 impl ToSql for Method {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
         Ok(self.as_str().into())
+    }
+}
+
+impl From<&Method> for reqwest::Method {
+    fn from(m: &Method) -> Self {
+        match m {
+            Method::GET => reqwest::Method::GET,
+            Method::POST => reqwest::Method::POST,
+            Method::PUT => reqwest::Method::PUT,
+            Method::DELETE => reqwest::Method::DELETE,
+            Method::HEAD => reqwest::Method::HEAD,
+            Method::OPTIONS => reqwest::Method::OPTIONS,
+            Method::CONNECT => reqwest::Method::CONNECT,
+            Method::PATCH => reqwest::Method::PATCH,
+            Method::TRACE => reqwest::Method::TRACE,
+        }
     }
 }
 

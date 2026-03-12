@@ -110,7 +110,7 @@ create table history (
 );
 
 -- add a default workspace?
--- insert into workspaces (name) values ('default');
+insert into workspaces (name) values ('default');
 
 -- log the first migration
 insert into _migrations (version) values (0);

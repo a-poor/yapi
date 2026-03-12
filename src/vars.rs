@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 use anyhow::Result;
 use regex::Regex;
 
-use crate::dtypes::{Request, RequestHeader, RequestQueryParam, Variable};
+use crate::dtypes::{HeaderEntry, HttpResponse, Method, Request, RequestHeader, RequestQueryParam, Variable};
 
 static VAR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{\{\s*([\w]+)\s*\}\}").unwrap());
 
@@ -61,10 +61,45 @@ pub fn build_var_map(coll_vars: &[Variable], env_vars: &[Variable]) -> HashMap<S
 }
 
 pub struct ResolvedRequest {
+    pub method: Method,
     pub url: String,
     pub body: Option<String>,
     pub headers: Vec<(String, String)>,
     pub query_params: Vec<(String, String)>,
+}
+
+impl ResolvedRequest {
+    pub fn to_header_json(&self) -> String {
+        let entries: Vec<HeaderEntry> = self
+            .headers
+            .iter()
+            .map(|(k, v)| HeaderEntry {
+                key: k.clone(),
+                value: v.clone(),
+            })
+            .collect();
+        serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    pub fn build_reqwest(&self, client: &reqwest::Client) -> Result<reqwest::Request> {
+        let method: reqwest::Method = (&self.method).into();
+        let mut url = reqwest::Url::parse(&self.url)?;
+        if !self.query_params.is_empty() {
+            let mut pairs = url.query_pairs_mut();
+            for (key, value) in &self.query_params {
+                pairs.append_pair(key, value);
+            }
+            drop(pairs);
+        }
+        let mut builder = client.request(method, url);
+        for (key, value) in &self.headers {
+            builder = builder.header(key, value);
+        }
+        if let Some(body) = &self.body {
+            builder = builder.body(body.clone());
+        }
+        Ok(builder.build()?)
+    }
 }
 
 /// Resolve all template placeholders in a request's fields.
@@ -88,10 +123,44 @@ pub fn resolve_request(
         resolved_qp.push((qp.qkey.clone(), fill(&qp.qval, vars)?));
     }
     Ok(ResolvedRequest {
+        method: request.method.clone(),
         url,
         body,
         headers: resolved_headers,
         query_params: resolved_qp,
+    })
+}
+
+pub async fn send_request(
+    resolved: &ResolvedRequest,
+    client: &reqwest::Client,
+) -> Result<HttpResponse> {
+    let request = resolved.build_reqwest(client)?;
+    let start = std::time::Instant::now();
+    let response = client.execute(request).await?;
+    let duration_secs = start.elapsed().as_secs_f64();
+
+    let status = response.status().as_u16();
+    let headers: Vec<HeaderEntry> = response
+        .headers()
+        .iter()
+        .map(|(k, v)| HeaderEntry {
+            key: k.as_str().to_string(),
+            value: v.to_str().unwrap_or("<non-utf8>").to_string(),
+        })
+        .collect();
+    let body_text = response.text().await?;
+    let body = if body_text.is_empty() {
+        None
+    } else {
+        Some(body_text)
+    };
+
+    Ok(HttpResponse {
+        status,
+        headers,
+        body,
+        duration_secs,
     })
 }
 
@@ -124,7 +193,7 @@ mod tests {
             id: 0,
             coll_id: 0,
             name: String::new(),
-            method: "GET".to_string(),
+            method: Method::GET,
             url: url.to_string(),
             body: body.map(|s| s.to_string()),
             created_at: NaiveDateTime::default(),
@@ -247,5 +316,130 @@ mod tests {
         let req = make_request("https://{{ host }}", None);
         let resolved = resolve_request(&req, &[], &[], &v).unwrap();
         assert!(resolved.body.is_none());
+    }
+
+    #[test]
+    fn build_reqwest_basic_get() {
+        let resolved = ResolvedRequest {
+            method: Method::GET,
+            url: "https://example.com/api".to_string(),
+            body: None,
+            headers: vec![],
+            query_params: vec![],
+        };
+        let client = reqwest::Client::new();
+        let req = resolved.build_reqwest(&client).unwrap();
+        assert_eq!(req.method(), reqwest::Method::GET);
+        assert_eq!(req.url().as_str(), "https://example.com/api");
+        assert!(req.body().is_none());
+    }
+
+    #[test]
+    fn build_reqwest_with_headers() {
+        let resolved = ResolvedRequest {
+            method: Method::GET,
+            url: "https://example.com".to_string(),
+            body: None,
+            headers: vec![
+                ("Authorization".to_string(), "Bearer token123".to_string()),
+                ("Accept".to_string(), "application/json".to_string()),
+            ],
+            query_params: vec![],
+        };
+        let client = reqwest::Client::new();
+        let req = resolved.build_reqwest(&client).unwrap();
+        assert_eq!(req.headers().get("Authorization").unwrap(), "Bearer token123");
+        assert_eq!(req.headers().get("Accept").unwrap(), "application/json");
+    }
+
+    #[test]
+    fn build_reqwest_with_query_params() {
+        let resolved = ResolvedRequest {
+            method: Method::GET,
+            url: "https://example.com/search".to_string(),
+            body: None,
+            headers: vec![],
+            query_params: vec![
+                ("q".to_string(), "rust".to_string()),
+                ("page".to_string(), "1".to_string()),
+            ],
+        };
+        let client = reqwest::Client::new();
+        let req = resolved.build_reqwest(&client).unwrap();
+        let url = req.url().to_string();
+        assert!(url.contains("q=rust"));
+        assert!(url.contains("page=1"));
+    }
+
+    #[test]
+    fn build_reqwest_with_body() {
+        let body = r#"{"name":"test"}"#;
+        let resolved = ResolvedRequest {
+            method: Method::POST,
+            url: "https://example.com/users".to_string(),
+            body: Some(body.to_string()),
+            headers: vec![],
+            query_params: vec![],
+        };
+        let client = reqwest::Client::new();
+        let req = resolved.build_reqwest(&client).unwrap();
+        assert_eq!(req.method(), reqwest::Method::POST);
+        let bytes = req.body().and_then(|b| b.as_bytes()).unwrap();
+        assert_eq!(bytes, body.as_bytes());
+    }
+
+    #[test]
+    fn test_to_header_json() {
+        let resolved = ResolvedRequest {
+            method: Method::GET,
+            url: "https://example.com".to_string(),
+            body: None,
+            headers: vec![
+                ("Content-Type".to_string(), "application/json".to_string()),
+                ("Authorization".to_string(), "Bearer tok".to_string()),
+            ],
+            query_params: vec![],
+        };
+        let json = resolved.to_header_json();
+        let parsed: Vec<HeaderEntry> = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].key, "Content-Type");
+        assert_eq!(parsed[0].value, "application/json");
+        assert_eq!(parsed[1].key, "Authorization");
+        assert_eq!(parsed[1].value, "Bearer tok");
+    }
+
+    #[test]
+    fn test_to_header_json_empty() {
+        let resolved = ResolvedRequest {
+            method: Method::GET,
+            url: "https://example.com".to_string(),
+            body: None,
+            headers: vec![],
+            query_params: vec![],
+        };
+        assert_eq!(resolved.to_header_json(), "[]");
+    }
+
+    #[test]
+    fn build_reqwest_full_request() {
+        let resolved = ResolvedRequest {
+            method: Method::PUT,
+            url: "https://example.com/items/42".to_string(),
+            body: Some(r#"{"status":"done"}"#.to_string()),
+            headers: vec![
+                ("Content-Type".to_string(), "application/json".to_string()),
+            ],
+            query_params: vec![
+                ("v".to_string(), "2".to_string()),
+            ],
+        };
+        let client = reqwest::Client::new();
+        let req = resolved.build_reqwest(&client).unwrap();
+        assert_eq!(req.method(), reqwest::Method::PUT);
+        assert!(req.url().as_str().contains("v=2"));
+        assert_eq!(req.headers().get("Content-Type").unwrap(), "application/json");
+        let bytes = req.body().and_then(|b| b.as_bytes()).unwrap();
+        assert_eq!(bytes, r#"{"status":"done"}"#.as_bytes());
     }
 }
