@@ -42,7 +42,7 @@ pub struct ReqArgs {
 #[derive(Debug, Subcommand)]
 pub enum ReqCmds {
     /// List requests in a collection
-    List,
+    List(ReqListArgs),
 
     /// Create a new request
     Create,
@@ -59,3 +59,6 @@ pub enum ReqCmds {
     /// Delete a request from a collection
     Del,
 }
+
+#[derive(Debug, Args)]
+pub struct ReqListArgs {}
