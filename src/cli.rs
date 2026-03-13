@@ -133,6 +133,24 @@ pub struct ReqRunArgs {
     /// Print the request as a curl command instead of sending it
     #[arg(long, conflicts_with_all = ["hide_body", "body_only"])]
     pub dry_run: bool,
+    /// Override the HTTP method
+    #[arg(short = 'X', long = "method")]
+    pub method: Option<String>,
+    /// Override/add headers (repeatable), format: "Key: Value"
+    #[arg(short = 'H', long = "header")]
+    pub headers: Vec<String>,
+    /// Override the request body
+    #[arg(short = 'd', long = "data")]
+    pub body: Option<String>,
+    /// Override/add query parameters (repeatable), format: "key=value"
+    #[arg(short, long = "query")]
+    pub queries: Vec<String>,
+    /// Override the request URL
+    #[arg(long)]
+    pub url: Option<String>,
+    /// Ad-hoc variables (repeatable), format: "key=value"
+    #[arg(long = "var")]
+    pub vars: Vec<String>,
 }
 
 #[derive(Debug, Args)]

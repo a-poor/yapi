@@ -255,9 +255,49 @@ impl App {
                 };
 
                 let coll_vars = self.db.list_collection_vars(coll.id)?;
-                let var_map = vars::build_var_map(&coll_vars, &env_vars);
+                let mut var_map = vars::build_var_map(&coll_vars, &env_vars);
 
-                let resolved = vars::resolve_request(&req, &headers, &qps, &var_map)?;
+                // Apply ad-hoc variables before resolving
+                for v in &args.vars {
+                    if let Some((k, val)) = v.split_once('=') {
+                        var_map.insert(k.to_string(), val.to_string());
+                    } else {
+                        anyhow::bail!("invalid --var format '{}', expected key=value", v);
+                    }
+                }
+
+                let mut resolved = vars::resolve_request(&req, &headers, &qps, &var_map)?;
+
+                // Apply overrides after resolving
+                if let Some(url) = &args.url {
+                    resolved.url = vars::fill(url, &var_map)?;
+                }
+                if let Some(m) = &args.method {
+                    resolved.method = m.parse().context("invalid HTTP method")?;
+                }
+                if let Some(body) = &args.body {
+                    resolved.body = Some(vars::fill(body, &var_map)?);
+                }
+                for h in &args.headers {
+                    if let Some((k, v)) = h.split_once(':') {
+                        let v = vars::fill(v.trim(), &var_map)?;
+                        if let Some(entry) = resolved.headers.iter_mut().find(|(key, _)| key == k.trim()) {
+                            entry.1 = v;
+                        } else {
+                            resolved.headers.push((k.trim().to_string(), v));
+                        }
+                    } else {
+                        anyhow::bail!("invalid --header format '{}', expected 'Key: Value'", h);
+                    }
+                }
+                for q in &args.queries {
+                    if let Some((k, v)) = q.split_once('=') {
+                        let v = vars::fill(v, &var_map)?;
+                        resolved.query_params.push((k.to_string(), v));
+                    } else {
+                        anyhow::bail!("invalid --query format '{}', expected key=value", q);
+                    }
+                }
 
                 if args.dry_run {
                     println!("{}", resolved.to_curl());

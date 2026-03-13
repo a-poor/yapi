@@ -117,6 +117,24 @@ impl Method {
     }
 }
 
+impl std::str::FromStr for Method {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "GET" => Ok(Method::GET),
+            "POST" => Ok(Method::POST),
+            "PUT" => Ok(Method::PUT),
+            "DELETE" => Ok(Method::DELETE),
+            "HEAD" => Ok(Method::HEAD),
+            "OPTIONS" => Ok(Method::OPTIONS),
+            "CONNECT" => Ok(Method::CONNECT),
+            "PATCH" => Ok(Method::PATCH),
+            "TRACE" => Ok(Method::TRACE),
+            _ => Err(anyhow::anyhow!("unknown HTTP method: {}", s)),
+        }
+    }
+}
+
 impl<'a> TryFrom<&'a str> for Method {
     type Error = &'static str;
 
