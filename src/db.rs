@@ -29,6 +29,7 @@ impl DBClient {
             Some(p) => Connection::open(p)?,
             None => Connection::open_in_memory()?,
         };
+        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         Ok(Self { conn })
     }
 

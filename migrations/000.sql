@@ -1,7 +1,3 @@
--- set some pragma stuff
-pragma foreign_keys = 1;
-pragma journal_mode = wal;
-
 begin;
 
 -- create the migrations table
@@ -20,7 +16,7 @@ create table workspaces (
 
 create table environments (
     id integer primary key autoincrement,
-    workspace_id integer not null references workspaces(id),
+    workspace_id integer not null references workspaces(id) on delete cascade,
     name text not null,
     description text not null default '',
     created_at datetime not null default (datetime('subsec')),
@@ -30,7 +26,7 @@ create table environments (
 
 create table environment_vars (
     id integer primary key autoincrement,
-    env_id integer not null references environments(id),
+    env_id integer not null references environments(id) on delete cascade,
     name text not null,
     description text not null default '',
     value text not null default '',
@@ -42,10 +38,10 @@ create table environment_vars (
 
 create table collections (
     id integer primary key autoincrement,
-    workspace_id integer not null references workspaces(id),
+    workspace_id integer not null references workspaces(id) on delete cascade,
     name text not null,
     description text not null default '',
-    default_env integer references environments(id),
+    default_env integer references environments(id) on delete set null,
     created_at datetime not null default (datetime('subsec')),
     updated_at datetime not null default (datetime('subsec')),
     unique(workspace_id, name)
@@ -53,7 +49,7 @@ create table collections (
 
 create table collection_vars (
     id integer primary key autoincrement,
-    coll_id integer not null references collections(id),
+    coll_id integer not null references collections(id) on delete cascade,
     name text not null,
     description text not null default '',
     value text not null default '',
@@ -65,7 +61,7 @@ create table collection_vars (
 
 create table requests (
     id integer primary key autoincrement,
-    coll_id integer not null references collections(id),
+    coll_id integer not null references collections(id) on delete cascade,
     name text not null,
     method text not null default 'GET',
     url text not null,
@@ -77,7 +73,7 @@ create table requests (
 
 create table request_headers (
     id integer primary key autoincrement,
-    req_id integer not null references requests(id),
+    req_id integer not null references requests(id) on delete cascade,
     hkey text not null,
     hval text not null,
     created_at datetime not null default (datetime('subsec')),
@@ -86,7 +82,7 @@ create table request_headers (
 
 create table request_query_params (
     id integer primary key autoincrement,
-    req_id integer not null references requests(id),
+    req_id integer not null references requests(id) on delete cascade,
     qkey text not null,
     qval text not null,
     created_at datetime not null default (datetime('subsec')),
@@ -95,7 +91,7 @@ create table request_query_params (
 
 create table history (
     id integer primary key autoincrement,
-    req_id integer references requests(id),
+    req_id integer references requests(id) on delete set null,
     method text not null,
     resolved_url text not null, -- req url after substitution
     resolved_req_headers text not null default '[]', -- json: [{"key":"","value":""}]

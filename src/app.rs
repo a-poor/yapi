@@ -198,7 +198,7 @@ impl App {
                 if !args.force {
                     let reqs = self.db.list_requests(coll.id)?.len();
                     let confirmed = inquire::Confirm::new(&format!(
-                        "Delete collection '{}' ({} request(s))?",
+                        "Permanently delete collection '{}' and all its contents ({} request(s))?",
                         coll.name, reqs
                     ))
                     .with_default(false)
@@ -297,7 +297,7 @@ impl App {
                     let colls = self.db.list_collections(ws.id)?.len();
                     let envs = self.db.list_environments(ws.id)?.len();
                     let confirmed = inquire::Confirm::new(&format!(
-                        "Delete workspace '{}' ({} collection(s), {} environment(s))?",
+                        "Permanently delete workspace '{}' and all its contents ({} collection(s), {} environment(s))?",
                         ws.name, colls, envs
                     ))
                     .with_default(false)
@@ -678,6 +678,54 @@ mod tests {
         let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
         let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
         assert!(db.get_collection_by_name(ws.id, "to-delete").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_cascade_delete_workspace_removes_children() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let env = app.db.create_environment(ws.id, "dev", "").unwrap();
+        app.db.create_environment_var(env.id, "KEY", "val", false).unwrap();
+        let coll = app.db.create_collection(ws.id, "coll", "").unwrap();
+        app.db.create_collection_var(coll.id, "CV", "v", false).unwrap();
+        let req = app.db.create_request(coll.id, "r1", "GET", "http://x", None).unwrap();
+        app.db.create_request_header(req.id, "h", "v").unwrap();
+        app.db.create_request_query_param(req.id, "q", "v").unwrap();
+
+        // Delete workspace — everything should cascade
+        app.db.delete_workspace(ws.id).unwrap();
+
+        assert!(app.db.list_environments(ws.id).unwrap().is_empty());
+        assert!(app.db.list_collections(ws.id).unwrap().is_empty());
+        assert!(app.db.list_requests(coll.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_cascade_delete_preserves_history_with_null_req() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let coll = app.db.create_collection(ws.id, "coll", "").unwrap();
+        let req = app.db.create_request(coll.id, "r1", "GET", "http://x", None).unwrap();
+
+        let hist = app.db.create_history(&crate::dtypes::CreateHistoryEntry {
+            req_id: Some(req.id),
+            method: "GET".into(),
+            resolved_url: "http://x".into(),
+            resolved_req_headers: "[]".into(),
+            resolved_req_body: None,
+            success: true,
+            res_status: Some(200),
+            res_body: None,
+            res_headers: "[]".into(),
+            res_duration: Some(0.1),
+        }).unwrap();
+
+        // Delete workspace — cascades to collection → request, history.req_id becomes NULL
+        app.db.delete_workspace(ws.id).unwrap();
+
+        let preserved = app.db.get_history_by_id(hist.id).unwrap();
+        assert!(preserved.is_some(), "history row should still exist");
+        assert_eq!(preserved.unwrap().req_id, None, "req_id should be NULL after cascade");
     }
 
     #[test]
