@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 use crate::cli::*;
 use crate::conf::{self, AppConfig, Env, RealEnv};
 use crate::db::DBClient;
-use crate::dtypes::{Collection, Workspace};
+use crate::dtypes::{Collection, CreateHistoryEntry, Workspace};
+use crate::vars;
 
 /// The core app type that owns config and database.
 pub struct App {
@@ -218,7 +219,131 @@ impl App {
                 println!("Deleted request: {}", req.name);
                 Ok(())
             }
-            ReqCmds::Run(_) => todo!("req run"),
+            ReqCmds::Run(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self.resolve_collection(ws.id, args.collection.as_deref())?;
+                let req = self
+                    .db
+                    .get_request_by_name(coll.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "request '{}' not found in collection '{}'",
+                            args.name,
+                            coll.name
+                        )
+                    })?;
+
+                let headers = self.db.list_request_headers(req.id)?;
+                let qps = self.db.list_request_query_params(req.id)?;
+
+                // Resolve environment variables
+                let env_vars = if let Some(env_name) = &args.env {
+                    let env = self
+                        .db
+                        .get_environment_by_name(ws.id, env_name)?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("environment '{}' not found", env_name)
+                        })?;
+                    self.db.list_environment_vars(env.id)?
+                } else if let Some(env_id) = coll.default_env {
+                    match self.db.get_environment_by_id(env_id)? {
+                        Some(env) => self.db.list_environment_vars(env.id)?,
+                        None => vec![],
+                    }
+                } else {
+                    vec![]
+                };
+
+                let coll_vars = self.db.list_collection_vars(coll.id)?;
+                let var_map = vars::build_var_map(&coll_vars, &env_vars);
+
+                let resolved = vars::resolve_request(&req, &headers, &qps, &var_map)?;
+
+                // Send the request
+                let client = reqwest::Client::new();
+                let rt = tokio::runtime::Runtime::new()?;
+                let result = rt.block_on(vars::send_request(&resolved, &client));
+
+                match result {
+                    Ok(response) => {
+                        // Print curl-style output
+                        // Build full URL with query params for display
+                        let mut display_url = reqwest::Url::parse(&resolved.url)?;
+                        if !resolved.query_params.is_empty() {
+                            let mut pairs = display_url.query_pairs_mut();
+                            for (k, v) in &resolved.query_params {
+                                pairs.append_pair(k, v);
+                            }
+                            drop(pairs);
+                        }
+                        let host = display_url.host_str().unwrap_or("unknown").to_string();
+                        let path_and_query = match display_url.query() {
+                            Some(q) => format!("{}?{}", display_url.path(), q),
+                            None => display_url.path().to_string(),
+                        };
+
+                        if !args.body_only {
+                            println!("* Host {}", host);
+                            println!(
+                                "> {} {} HTTP/1.1",
+                                resolved.method.as_str(),
+                                path_and_query,
+                            );
+                            for (k, v) in &resolved.headers {
+                                println!("> {}: {}", k, v);
+                            }
+                            println!(">");
+                            println!(
+                                "< {} {}",
+                                response.http_version,
+                                response.status,
+                            );
+                            for h in &response.headers {
+                                println!("< {}: {}", h.key, h.value);
+                            }
+                            println!("<");
+                        }
+                        if !args.hide_body {
+                            if let Some(body) = &response.body {
+                                println!("{}", body);
+                            }
+                        }
+
+                        // Save history
+                        self.db.create_history(&CreateHistoryEntry {
+                            req_id: Some(req.id),
+                            method: req.method.as_str().to_string(),
+                            resolved_url: resolved.url.clone(),
+                            resolved_req_headers: resolved.to_header_json(),
+                            resolved_req_body: resolved.body.clone(),
+                            success: true,
+                            res_status: Some(response.status),
+                            res_body: response.body.clone(),
+                            res_headers: serde_json::to_string(&response.headers)?,
+                            res_duration: Some(response.duration_secs),
+                        })?;
+
+                        Ok(())
+                    }
+                    Err(err) => {
+                        // Save failed history
+                        self.db.create_history(&CreateHistoryEntry {
+                            req_id: Some(req.id),
+                            method: req.method.as_str().to_string(),
+                            resolved_url: resolved.url.clone(),
+                            resolved_req_headers: resolved.to_header_json(),
+                            resolved_req_body: resolved.body.clone(),
+                            success: false,
+                            res_status: None,
+                            res_body: None,
+                            res_headers: "[]".to_string(),
+                            res_duration: None,
+                        })?;
+
+                        Err(err)
+                    }
+                }
+            }
         }
     }
 
@@ -1429,5 +1554,42 @@ mod tests {
             .join("yapi.db");
         assert!(expected.exists());
         assert!(app.config.database.is_none());
+    }
+
+    #[test]
+    fn test_req_run_missing_request_errors() {
+        let (_dir, app) = test_app();
+        app.db.create_workspace("ws", "").unwrap();
+        app.db
+            .create_collection(
+                app.db.get_workspace_by_name("ws").unwrap().unwrap().id,
+                "coll",
+                "",
+            )
+            .unwrap();
+        let cli = parse_cli(&["req", "run", "nonexistent", "-c", "coll", "-w", "ws"]);
+        let err = app.run(cli).unwrap_err();
+        assert!(
+            err.to_string().contains("not found"),
+            "expected 'not found' error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_req_run_undefined_var_errors() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let coll = app.db.create_collection(ws.id, "coll", "").unwrap();
+        app.db
+            .create_request(coll.id, "var-req", "GET", "https://{{ missing }}/api", None)
+            .unwrap();
+        let cli = parse_cli(&["req", "run", "var-req", "-c", "coll", "-w", "ws"]);
+        let err = app.run(cli).unwrap_err();
+        assert!(
+            err.to_string().contains("undefined variables"),
+            "expected 'undefined variables' error, got: {}",
+            err
+        );
     }
 }

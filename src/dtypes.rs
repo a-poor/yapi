@@ -11,6 +11,7 @@ pub struct HeaderEntry {
 #[derive(Debug)]
 pub struct HttpResponse {
     pub status: u16,
+    pub http_version: String,
     pub headers: Vec<HeaderEntry>,
     pub body: Option<String>,
     pub duration_secs: f64,

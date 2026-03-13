@@ -124,6 +124,12 @@ pub struct ReqRunArgs {
     /// Environment to use for variable substitution
     #[arg(short, long)]
     pub env: Option<String>,
+    /// Hide the response body, show only headers/meta
+    #[arg(long, conflicts_with = "body_only")]
+    pub hide_body: bool,
+    /// Print only the response body (hide meta/headers)
+    #[arg(long, conflicts_with = "hide_body")]
+    pub body_only: bool,
 }
 
 #[derive(Debug, Args)]

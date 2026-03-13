@@ -141,6 +141,7 @@ pub async fn send_request(
     let duration_secs = start.elapsed().as_secs_f64();
 
     let status = response.status().as_u16();
+    let http_version = format!("{:?}", response.version());
     let headers: Vec<HeaderEntry> = response
         .headers()
         .iter()
@@ -158,6 +159,7 @@ pub async fn send_request(
 
     Ok(HttpResponse {
         status,
+        http_version,
         headers,
         body,
         duration_secs,
