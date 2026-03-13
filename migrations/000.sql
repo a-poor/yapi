@@ -105,8 +105,9 @@ create table history (
     updated_at datetime not null default (datetime('subsec'))
 );
 
--- add a default workspace?
+-- add a default workspace and collection
 insert into workspaces (name) values ('default');
+insert into collections (workspace_id, name) values (1, 'default');
 
 -- log the first migration
 insert into _migrations (version) values (0);

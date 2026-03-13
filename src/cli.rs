@@ -160,6 +160,9 @@ pub struct ReqDelArgs {
     /// Workspace name
     #[arg(short, long)]
     pub workspace: Option<String>,
+    /// Skip confirmation prompt
+    #[arg(long)]
+    pub force: bool,
 }
 
 // ── Coll ────────────────────────────────────────────────────────────────

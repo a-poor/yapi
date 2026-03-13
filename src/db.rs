@@ -1104,9 +1104,9 @@ mod tests {
         // Get non-existent returns None
         assert!(db.get_collection_by_id(9999).unwrap().is_none());
 
-        // List
+        // List (includes seeded "default" collection + the one we created)
         let colls = db.list_collections(ws.id).unwrap();
-        assert_eq!(colls.len(), 1);
+        assert_eq!(colls.len(), 2);
 
         // Update
         db.update_collection(coll.id, "renamed-coll", "new desc")
@@ -1124,7 +1124,7 @@ mod tests {
         // Delete
         db.delete_collection(coll.id).unwrap();
         let colls = db.list_collections(ws.id).unwrap();
-        assert_eq!(colls.len(), 0);
+        assert_eq!(colls.len(), 1); // seeded "default" remains
 
         // Delete non-existent returns NotFoundError
         let err = db.delete_collection(coll.id).unwrap_err();

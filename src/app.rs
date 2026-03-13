@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use crate::cli::*;
 use crate::conf::{self, AppConfig, Env, RealEnv};
 use crate::db::DBClient;
-use crate::dtypes::Workspace;
+use crate::dtypes::{Collection, Workspace};
 
 /// The core app type that owns config and database.
 pub struct App {
@@ -81,12 +81,144 @@ impl App {
 
     fn run_req(self, args: ReqArgs) -> Result<()> {
         match args.cmd {
-            ReqCmds::List(_) => todo!("req list"),
-            ReqCmds::Create(_) => todo!("req create"),
-            ReqCmds::Show(_) => todo!("req show"),
+            ReqCmds::List(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self.resolve_collection(ws.id, args.collection.as_deref())?;
+                let requests = self.db.list_requests(coll.id)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&requests)?);
+                } else {
+                    for r in &requests {
+                        println!("{}\t{}\t{}", r.name, r.method.as_str(), r.url);
+                    }
+                }
+                Ok(())
+            }
+            ReqCmds::Create(args) => {
+                if args.name.is_empty() {
+                    anyhow::bail!("request name must not be empty");
+                }
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self.resolve_collection(ws.id, args.collection.as_deref())?;
+                let method = args.method.as_deref().unwrap_or("GET");
+                let req = self.db.create_request(
+                    coll.id,
+                    &args.name,
+                    method,
+                    &args.url,
+                    args.body.as_deref(),
+                )?;
+                for h in &args.headers {
+                    let (key, value) = h.split_once(": ").ok_or_else(|| {
+                        anyhow::anyhow!("invalid header format '{}', expected 'Key: Value'", h)
+                    })?;
+                    self.db.create_request_header(req.id, key, value)?;
+                }
+                for q in &args.queries {
+                    let (key, value) = q.split_once('=').ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "invalid query param format '{}', expected 'key=value'",
+                            q
+                        )
+                    })?;
+                    self.db.create_request_query_param(req.id, key, value)?;
+                }
+                println!("Created request: {}", req.name);
+                Ok(())
+            }
+            ReqCmds::Show(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self.resolve_collection(ws.id, args.collection.as_deref())?;
+                let req = self
+                    .db
+                    .get_request_by_name(coll.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "request '{}' not found in collection '{}'",
+                            args.name,
+                            coll.name
+                        )
+                    })?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&req)?);
+                } else {
+                    let headers = self.db.list_request_headers(req.id)?;
+                    let params = self.db.list_request_query_params(req.id)?;
+                    println!("Name:    {}", req.name);
+                    println!("Method:  {}", req.method.as_str());
+                    println!("URL:     {}", req.url);
+                    println!(
+                        "Body:    {}",
+                        req.body.as_deref().unwrap_or("(none)")
+                    );
+                    println!("Headers:");
+                    for h in &headers {
+                        println!("  {}: {}", h.hkey, h.hval);
+                    }
+                    println!("Query Params:");
+                    for p in &params {
+                        println!("  {}={}", p.qkey, p.qval);
+                    }
+                    println!("Created: {}", req.created_at);
+                    println!("Updated: {}", req.updated_at);
+                }
+                Ok(())
+            }
+            ReqCmds::Update(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self.resolve_collection(ws.id, args.collection.as_deref())?;
+                let req = self
+                    .db
+                    .get_request_by_name(coll.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "request '{}' not found in collection '{}'",
+                            args.name,
+                            coll.name
+                        )
+                    })?;
+                let new_name = args.new_name.as_deref().unwrap_or(&req.name);
+                let new_method = args
+                    .new_method
+                    .as_deref()
+                    .unwrap_or(req.method.as_str());
+                let new_url = args.new_url.as_deref().unwrap_or(&req.url);
+                let new_body = args.new_body.as_deref().or(req.body.as_deref());
+                self.db
+                    .update_request(req.id, new_name, new_method, new_url, new_body)?;
+                println!("Updated request: {}", new_name);
+                Ok(())
+            }
+            ReqCmds::Del(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self.resolve_collection(ws.id, args.collection.as_deref())?;
+                let req = self
+                    .db
+                    .get_request_by_name(coll.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "request '{}' not found in collection '{}'",
+                            args.name,
+                            coll.name
+                        )
+                    })?;
+                if !args.force {
+                    let confirmed = inquire::Confirm::new(&format!(
+                        "Permanently delete request '{}'?",
+                        req.name
+                    ))
+                    .with_default(false)
+                    .prompt()?;
+                    if !confirmed {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                }
+                self.db.delete_request(req.id)?;
+                println!("Deleted request: {}", req.name);
+                Ok(())
+            }
             ReqCmds::Run(_) => todo!("req run"),
-            ReqCmds::Update(_) => todo!("req update"),
-            ReqCmds::Del(_) => todo!("req del"),
         }
     }
 
@@ -100,6 +232,28 @@ impl App {
         self.db
             .get_workspace_by_name(&ws_name)?
             .ok_or_else(|| anyhow::anyhow!("workspace '{}' not found", ws_name))
+    }
+
+    fn resolve_collection(&self, ws_id: i64, name: Option<&str>) -> Result<Collection> {
+        let coll_name = name
+            .map(String::from)
+            .or_else(|| self.config.defaults.as_ref()?.collection.clone());
+        match coll_name {
+            Some(n) => self
+                .db
+                .get_collection_by_name(ws_id, &n)?
+                .ok_or_else(|| anyhow::anyhow!("collection '{}' not found", n)),
+            None => {
+                let colls = self.db.list_collections(ws_id)?;
+                if colls.len() == 1 {
+                    Ok(colls.into_iter().next().unwrap())
+                } else {
+                    anyhow::bail!(
+                        "no collection specified and no default configured. Use -c <name> or set defaults.collection in config"
+                    )
+                }
+            }
+        }
     }
 
     // ── Collection handlers ─────────────────────────────────────
@@ -1130,6 +1284,129 @@ mod tests {
         let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
         let env = db.get_environment_by_name(ws.id, "dev").unwrap().unwrap();
         assert!(db.get_environment_var_by_name(env.id, "KEY").unwrap().is_none());
+    }
+
+    // ── Request tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_req_create_and_list() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let coll = app.db.create_collection(ws.id, "coll", "").unwrap();
+        app.db.create_request(coll.id, "my-req", "GET", "http://example.com", None).unwrap();
+        let cli = parse_cli(&["req", "list", "-c", "coll", "-w", "ws"]);
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_req_create_via_cli() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_collection(ws.id, "coll", "").unwrap();
+        let cli = parse_cli(&[
+            "req", "create", "my-req", "http://example.com",
+            "-c", "coll", "-w", "ws",
+            "-X", "POST",
+            "-d", r#"{"key":"val"}"#,
+            "-H", "Content-Type: application/json",
+            "-q", "page=1",
+        ]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let coll = db.get_collection_by_name(ws.id, "coll").unwrap().unwrap();
+        let req = db.get_request_by_name(coll.id, "my-req").unwrap();
+        assert!(req.is_some());
+        let req = req.unwrap();
+        assert_eq!(req.method, crate::dtypes::Method::POST);
+        assert_eq!(req.url, "http://example.com");
+        assert_eq!(req.body.as_deref(), Some(r#"{"key":"val"}"#));
+
+        let headers = db.list_request_headers(req.id).unwrap();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].hkey, "Content-Type");
+        assert_eq!(headers[0].hval, "application/json");
+
+        let params = db.list_request_query_params(req.id).unwrap();
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].qkey, "page");
+        assert_eq!(params[0].qval, "1");
+    }
+
+    #[test]
+    fn test_req_create_empty_name_fails() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_collection(ws.id, "coll", "").unwrap();
+        let cli = parse_cli(&["req", "create", "", "http://x", "-c", "coll", "-w", "ws"]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn test_req_show_found() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let coll = app.db.create_collection(ws.id, "coll", "").unwrap();
+        let req = app.db.create_request(coll.id, "my-req", "POST", "http://x", Some("body")).unwrap();
+        app.db.create_request_header(req.id, "Accept", "text/html").unwrap();
+        app.db.create_request_query_param(req.id, "q", "test").unwrap();
+        let cli = parse_cli(&["req", "show", "my-req", "-c", "coll", "-w", "ws"]);
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_req_show_not_found() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_collection(ws.id, "coll", "").unwrap();
+        let cli = parse_cli(&["req", "show", "nonexistent", "-c", "coll", "-w", "ws"]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_req_update_name_and_url() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let coll = app.db.create_collection(ws.id, "coll", "").unwrap();
+        app.db.create_request(coll.id, "old-req", "GET", "http://old.com", None).unwrap();
+        let cli = parse_cli(&[
+            "req", "update", "old-req", "-c", "coll", "-w", "ws",
+            "--new-name", "new-req",
+            "--new-url", "http://new.com",
+        ]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let coll = db.get_collection_by_name(ws.id, "coll").unwrap().unwrap();
+        let req = db.get_request_by_name(coll.id, "new-req").unwrap();
+        assert!(req.is_some());
+        let req = req.unwrap();
+        assert_eq!(req.url, "http://new.com");
+        assert!(db.get_request_by_name(coll.id, "old-req").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_req_delete_force() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let coll = app.db.create_collection(ws.id, "coll", "").unwrap();
+        app.db.create_request(coll.id, "to-delete", "GET", "http://x", None).unwrap();
+        let cli = parse_cli(&["req", "del", "to-delete", "-c", "coll", "-w", "ws", "--force"]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let coll = db.get_collection_by_name(ws.id, "coll").unwrap().unwrap();
+        assert!(db.get_request_by_name(coll.id, "to-delete").unwrap().is_none());
     }
 
     #[test]
