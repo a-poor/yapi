@@ -131,6 +131,21 @@ impl DBClient {
         Ok(())
     }
 
+    pub fn set_workspace_default_env(&self, id: i64, env_id: Option<i64>) -> Result<()> {
+        let rows = self.conn.execute(
+            "UPDATE workspaces SET default_env = ?1, updated_at = datetime('subsec') WHERE id = ?2",
+            rusqlite::params![env_id, id],
+        )?;
+        if rows == 0 {
+            return Err(NotFoundError {
+                entity: "workspace",
+                id,
+            }
+            .into());
+        }
+        Ok(())
+    }
+
     pub fn delete_workspace(&self, id: i64) -> Result<()> {
         let rows = self
             .conn

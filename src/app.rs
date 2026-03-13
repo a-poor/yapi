@@ -128,11 +128,89 @@ impl App {
 
     fn run_work(self, args: WorkArgs) -> Result<()> {
         match args.cmd {
-            WorkCmds::List(_) => todo!("work list"),
-            WorkCmds::Create(_) => todo!("work create"),
-            WorkCmds::Show(_) => todo!("work show"),
-            WorkCmds::Update(_) => todo!("work update"),
-            WorkCmds::Del(_) => todo!("work del"),
+            WorkCmds::List(args) => {
+                let workspaces = self.db.list_workspaces()?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&workspaces)?);
+                } else {
+                    for ws in &workspaces {
+                        println!("{}\t{}", ws.name, ws.description);
+                    }
+                }
+                Ok(())
+            }
+            WorkCmds::Create(args) => {
+                if args.name.is_empty() {
+                    anyhow::bail!("workspace name must not be empty");
+                }
+                let desc = args.description.as_deref().unwrap_or("");
+                let ws = self.db.create_workspace(&args.name, desc)?;
+                println!("Created workspace: {}", ws.name);
+                Ok(())
+            }
+            WorkCmds::Show(args) => {
+                let ws = self
+                    .db
+                    .get_workspace_by_name(&args.name)?
+                    .ok_or_else(|| anyhow::anyhow!("workspace '{}' not found", args.name))?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&ws)?);
+                } else {
+                    println!("Name:        {}", ws.name);
+                    println!("Description: {}", ws.description);
+                    println!("Default Env: {}", ws.default_env.map_or("(none)".into(), |id| id.to_string()));
+                    println!("Created:     {}", ws.created_at);
+                    println!("Updated:     {}", ws.updated_at);
+                }
+                Ok(())
+            }
+            WorkCmds::Update(args) => {
+                let ws = self
+                    .db
+                    .get_workspace_by_name(&args.name)?
+                    .ok_or_else(|| anyhow::anyhow!("workspace '{}' not found", args.name))?;
+                let new_name = args.new_name.as_deref().unwrap_or(&ws.name);
+                let new_desc = args.new_description.as_deref().unwrap_or(&ws.description);
+                self.db.update_workspace(ws.id, new_name, new_desc)?;
+                if let Some(env_name) = &args.default_env {
+                    let env = self
+                        .db
+                        .get_environment_by_name(ws.id, env_name)?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "environment '{}' not found in workspace '{}'",
+                                env_name,
+                                ws.name
+                            )
+                        })?;
+                    self.db.set_workspace_default_env(ws.id, Some(env.id))?;
+                }
+                println!("Updated workspace: {}", new_name);
+                Ok(())
+            }
+            WorkCmds::Del(args) => {
+                let ws = self
+                    .db
+                    .get_workspace_by_name(&args.name)?
+                    .ok_or_else(|| anyhow::anyhow!("workspace '{}' not found", args.name))?;
+                if !args.force {
+                    let colls = self.db.list_collections(ws.id)?.len();
+                    let envs = self.db.list_environments(ws.id)?.len();
+                    let confirmed = inquire::Confirm::new(&format!(
+                        "Delete workspace '{}' ({} collection(s), {} environment(s))?",
+                        ws.name, colls, envs
+                    ))
+                    .with_default(false)
+                    .prompt()?;
+                    if !confirmed {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                }
+                self.db.delete_workspace(ws.id)?;
+                println!("Deleted workspace: {}", ws.name);
+                Ok(())
+            }
         }
     }
 
@@ -295,6 +373,115 @@ mod tests {
             app.config.database.unwrap().path.unwrap(),
             db_path.to_str().unwrap()
         );
+    }
+
+    /// Helper: create an App with a temp dir and in-memory-like DB for testing.
+    fn test_app() -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            format!("[database]\npath = {:?}\n", db_path.to_str().unwrap()),
+        )
+        .unwrap();
+        let env = FakeEnv(HashMap::from([(
+            "HOME".into(),
+            dir.path().to_str().unwrap().into(),
+        )]));
+        let app = App::new_with_env(&env, Some(config_path)).unwrap();
+        (dir, app)
+    }
+
+    fn parse_cli(args: &[&str]) -> Cli {
+        use clap::Parser;
+        Cli::parse_from(std::iter::once("yapi").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn test_work_create_and_list() {
+        let (_dir, app) = test_app();
+
+        // Create a workspace
+        app.db.create_workspace("test-ws", "A test workspace").unwrap();
+
+        let workspaces = app.db.list_workspaces().unwrap();
+        // Should have the default workspace + the new one
+        let names: Vec<&str> = workspaces.iter().map(|w| w.name.as_str()).collect();
+        assert!(names.contains(&"test-ws"));
+    }
+
+    #[test]
+    fn test_work_create_empty_name_fails() {
+        let (_dir, app) = test_app();
+        let cli = parse_cli(&["work", "create", ""]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn test_work_show_found() {
+        let (_dir, app) = test_app();
+        app.db.create_workspace("my-ws", "desc").unwrap();
+        let cli = parse_cli(&["work", "show", "my-ws"]);
+        // Should succeed without error
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_work_show_not_found() {
+        let (_dir, app) = test_app();
+        let cli = parse_cli(&["work", "show", "nonexistent"]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_work_update_name_and_description() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        app.db.create_workspace("old-name", "old desc").unwrap();
+        let cli = parse_cli(&[
+            "work", "update", "old-name",
+            "--new-name", "new-name",
+            "--new-description", "new desc",
+        ]);
+        app.run(cli).unwrap();
+
+        // Reconnect to verify
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("new-name").unwrap();
+        assert!(ws.is_some());
+        assert_eq!(ws.unwrap().description, "new desc");
+        assert!(db.get_workspace_by_name("old-name").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_work_update_default_env() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws1", "").unwrap();
+        app.db.create_environment(ws.id, "staging", "").unwrap();
+        let cli = parse_cli(&["work", "update", "ws1", "--default-env", "staging"]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws1").unwrap().unwrap();
+        assert!(ws.default_env.is_some());
+    }
+
+    #[test]
+    fn test_work_delete_force() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        app.db.create_workspace("to-delete", "").unwrap();
+        let cli = parse_cli(&["work", "del", "to-delete", "--force"]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        assert!(db.get_workspace_by_name("to-delete").unwrap().is_none());
     }
 
     #[test]

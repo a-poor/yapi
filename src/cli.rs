@@ -487,12 +487,18 @@ pub struct WorkUpdateArgs {
     /// New description
     #[arg(long)]
     pub new_description: Option<String>,
+    /// Set the default environment (by name)
+    #[arg(long)]
+    pub default_env: Option<String>,
 }
 
 #[derive(Debug, Args)]
 pub struct WorkDelArgs {
     /// Name of the workspace to delete
     pub name: String,
+    /// Skip confirmation prompt
+    #[arg(long)]
+    pub force: bool,
 }
 
 // ── Hist ────────────────────────────────────────────────────────────────
