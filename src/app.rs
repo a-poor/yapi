@@ -156,6 +156,49 @@ impl App {
 
     fn run_conf(self, args: ConfArgs) -> Result<()> {
         match args.cmd {
+            ConfCmds::Init(args) => {
+                let config_path = conf::config_path();
+                let db_path = self
+                    .config
+                    .database
+                    .as_ref()
+                    .and_then(|d| d.path.as_ref())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(conf::default_db_path);
+
+                if config_path.exists() && !args.force {
+                    anyhow::bail!(
+                        "Config file already exists: {}\nUse --force to overwrite.",
+                        config_path.display()
+                    );
+                }
+
+                if args.force {
+                    if config_path.exists() {
+                        fs::remove_file(&config_path)?;
+                    }
+                    if db_path.exists() {
+                        fs::remove_file(&db_path)?;
+                    }
+                }
+
+                let default_db_path = conf::default_db_path();
+                let config = AppConfig {
+                    database: Some(conf::DatabaseConfig {
+                        path: Some(
+                            default_db_path
+                                .to_str()
+                                .expect("invalid db path")
+                                .to_string(),
+                        ),
+                    }),
+                    ..AppConfig::default()
+                };
+                conf::save(&config)?;
+                println!("Created config file: {}", config_path.display());
+                println!("Database file: {}", db_path.display());
+                Ok(())
+            }
             ConfCmds::Show => {
                 // TODO: When --config CLI flag or YAPI_CONFIG env var is added,
                 // update config_file source to reflect the override (e.g. "set via --config"

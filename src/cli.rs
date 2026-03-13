@@ -554,12 +554,21 @@ pub struct ConfArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum ConfCmds {
+    /// Initialize a default configuration file
+    Init(ConfInitArgs),
     /// Show current configuration
     Show,
     /// Set a configuration value
     Set(ConfSetArgs),
     /// Get a configuration value
     Get(ConfGetArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ConfInitArgs {
+    /// Overwrite existing config and database files
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Debug, Args)]
