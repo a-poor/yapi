@@ -130,6 +130,9 @@ pub struct ReqRunArgs {
     /// Print only the response body (hide meta/headers)
     #[arg(long, conflicts_with = "hide_body")]
     pub body_only: bool,
+    /// Print the request as a curl command instead of sending it
+    #[arg(long, conflicts_with_all = ["hide_body", "body_only"])]
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Args)]

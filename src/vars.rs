@@ -81,6 +81,31 @@ impl ResolvedRequest {
         serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
     }
 
+    pub fn to_curl(&self) -> String {
+        let mut parts = vec![format!("curl -X {}", self.method.as_str())];
+        for (key, value) in &self.headers {
+            let escaped = format!("{}: {}", key, value).replace('\'', "'\\''");
+            parts.push(format!("-H '{}'", escaped));
+        }
+        if let Some(body) = &self.body {
+            let escaped = body.replace('\'', "'\\''");
+            parts.push(format!("-d '{}'", escaped));
+        }
+        let mut url = reqwest::Url::parse(&self.url).unwrap_or_else(|_| {
+            reqwest::Url::parse("http://invalid").unwrap()
+        });
+        if !self.query_params.is_empty() {
+            let mut pairs = url.query_pairs_mut();
+            for (k, v) in &self.query_params {
+                pairs.append_pair(k, v);
+            }
+            drop(pairs);
+        }
+        let url_str = url.as_str().replace('\'', "'\\''");
+        parts.push(format!("'{}'", url_str));
+        parts.join(" \\\n  ")
+    }
+
     pub fn build_reqwest(&self, client: &reqwest::Client) -> Result<reqwest::Request> {
         let method: reqwest::Method = (&self.method).into();
         let mut url = reqwest::Url::parse(&self.url)?;
@@ -443,5 +468,56 @@ mod tests {
         assert_eq!(req.headers().get("Content-Type").unwrap(), "application/json");
         let bytes = req.body().and_then(|b| b.as_bytes()).unwrap();
         assert_eq!(bytes, r#"{"status":"done"}"#.as_bytes());
+    }
+
+    #[test]
+    fn to_curl_get_no_body() {
+        let resolved = ResolvedRequest {
+            method: Method::GET,
+            url: "https://example.com/api".to_string(),
+            body: None,
+            headers: vec![],
+            query_params: vec![],
+        };
+        let curl = resolved.to_curl();
+        assert_eq!(curl, "curl -X GET \\\n  'https://example.com/api'");
+    }
+
+    #[test]
+    fn to_curl_post_with_body_headers_query() {
+        let resolved = ResolvedRequest {
+            method: Method::POST,
+            url: "https://example.com/api".to_string(),
+            body: Some(r#"{"key":"value"}"#.to_string()),
+            headers: vec![
+                ("Content-Type".to_string(), "application/json".to_string()),
+                ("Authorization".to_string(), "Bearer tok123".to_string()),
+            ],
+            query_params: vec![
+                ("page".to_string(), "1".to_string()),
+                ("q".to_string(), "hello world".to_string()),
+            ],
+        };
+        let curl = resolved.to_curl();
+        assert!(curl.starts_with("curl -X POST"));
+        assert!(curl.contains("-H 'Content-Type: application/json'"));
+        assert!(curl.contains("-H 'Authorization: Bearer tok123'"));
+        assert!(curl.contains(r#"-d '{"key":"value"}'"#));
+        assert!(curl.contains("page=1"));
+        assert!(curl.contains("q=hello+world") || curl.contains("q=hello%20world"));
+    }
+
+    #[test]
+    fn to_curl_escapes_single_quotes() {
+        let resolved = ResolvedRequest {
+            method: Method::POST,
+            url: "https://example.com".to_string(),
+            body: Some("it's a test".to_string()),
+            headers: vec![("X-Msg".to_string(), "it's here".to_string())],
+            query_params: vec![],
+        };
+        let curl = resolved.to_curl();
+        assert!(curl.contains(r"-d 'it'\''s a test'"));
+        assert!(curl.contains(r"-H 'X-Msg: it'\''s here'"));
     }
 }

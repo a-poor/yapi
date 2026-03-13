@@ -259,6 +259,11 @@ impl App {
 
                 let resolved = vars::resolve_request(&req, &headers, &qps, &var_map)?;
 
+                if args.dry_run {
+                    println!("{}", resolved.to_curl());
+                    return Ok(());
+                }
+
                 // Send the request
                 let client = reqwest::Client::new();
                 let rt = tokio::runtime::Runtime::new()?;
