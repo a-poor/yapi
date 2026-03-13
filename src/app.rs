@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use crate::cli::*;
 use crate::conf::{self, AppConfig, Env, RealEnv};
 use crate::db::DBClient;
+use crate::dtypes::Workspace;
 
 /// The core app type that owns config and database.
 pub struct App {
@@ -89,15 +90,128 @@ impl App {
         }
     }
 
+    // ── Helpers ──────────────────────────────────────────────────
+
+    fn resolve_workspace(&self, name: Option<&str>) -> Result<Workspace> {
+        let ws_name = name
+            .map(String::from)
+            .or_else(|| self.config.defaults.as_ref()?.workspace.clone())
+            .unwrap_or_else(|| "default".into());
+        self.db
+            .get_workspace_by_name(&ws_name)?
+            .ok_or_else(|| anyhow::anyhow!("workspace '{}' not found", ws_name))
+    }
+
     // ── Collection handlers ─────────────────────────────────────
 
     fn run_coll(self, args: CollArgs) -> Result<()> {
         match args.cmd {
-            CollCmds::List(_) => todo!("coll list"),
-            CollCmds::Create(_) => todo!("coll create"),
-            CollCmds::Show(_) => todo!("coll show"),
-            CollCmds::Update(_) => todo!("coll update"),
-            CollCmds::Del(_) => todo!("coll del"),
+            CollCmds::List(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let collections = self.db.list_collections(ws.id)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&collections)?);
+                } else {
+                    for c in &collections {
+                        println!("{}\t{}", c.name, c.description);
+                    }
+                }
+                Ok(())
+            }
+            CollCmds::Create(args) => {
+                if args.name.is_empty() {
+                    anyhow::bail!("collection name must not be empty");
+                }
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let desc = args.description.as_deref().unwrap_or("");
+                let coll = self.db.create_collection(ws.id, &args.name, desc)?;
+                println!("Created collection: {}", coll.name);
+                Ok(())
+            }
+            CollCmds::Show(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self
+                    .db
+                    .get_collection_by_name(ws.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "collection '{}' not found in workspace '{}'",
+                            args.name,
+                            ws.name
+                        )
+                    })?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&coll)?);
+                } else {
+                    println!("Name:        {}", coll.name);
+                    println!("Description: {}", coll.description);
+                    println!("Workspace:   {}", ws.name);
+                    println!("Default Env: {}", coll.default_env.map_or("(none)".into(), |id: i64| id.to_string()));
+                    println!("Created:     {}", coll.created_at);
+                    println!("Updated:     {}", coll.updated_at);
+                }
+                Ok(())
+            }
+            CollCmds::Update(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self
+                    .db
+                    .get_collection_by_name(ws.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "collection '{}' not found in workspace '{}'",
+                            args.name,
+                            ws.name
+                        )
+                    })?;
+                let new_name = args.new_name.as_deref().unwrap_or(&coll.name);
+                let new_desc = args.new_description.as_deref().unwrap_or(&coll.description);
+                self.db.update_collection(coll.id, new_name, new_desc)?;
+                if let Some(env_name) = &args.default_env {
+                    let env = self
+                        .db
+                        .get_environment_by_name(ws.id, env_name)?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "environment '{}' not found in workspace '{}'",
+                                env_name,
+                                ws.name
+                            )
+                        })?;
+                    self.db.set_collection_default_env(coll.id, Some(env.id))?;
+                }
+                println!("Updated collection: {}", new_name);
+                Ok(())
+            }
+            CollCmds::Del(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self
+                    .db
+                    .get_collection_by_name(ws.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "collection '{}' not found in workspace '{}'",
+                            args.name,
+                            ws.name
+                        )
+                    })?;
+                if !args.force {
+                    let reqs = self.db.list_requests(coll.id)?.len();
+                    let confirmed = inquire::Confirm::new(&format!(
+                        "Delete collection '{}' ({} request(s))?",
+                        coll.name, reqs
+                    ))
+                    .with_default(false)
+                    .prompt()?;
+                    if !confirmed {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                }
+                self.db.delete_collection(coll.id)?;
+                println!("Deleted collection: {}", coll.name);
+                Ok(())
+            }
         }
     }
 
@@ -158,7 +272,6 @@ impl App {
                 } else {
                     println!("Name:        {}", ws.name);
                     println!("Description: {}", ws.description);
-                    println!("Default Env: {}", ws.default_env.map_or("(none)".into(), |id| id.to_string()));
                     println!("Created:     {}", ws.created_at);
                     println!("Updated:     {}", ws.updated_at);
                 }
@@ -172,19 +285,6 @@ impl App {
                 let new_name = args.new_name.as_deref().unwrap_or(&ws.name);
                 let new_desc = args.new_description.as_deref().unwrap_or(&ws.description);
                 self.db.update_workspace(ws.id, new_name, new_desc)?;
-                if let Some(env_name) = &args.default_env {
-                    let env = self
-                        .db
-                        .get_environment_by_name(ws.id, env_name)?
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "environment '{}' not found in workspace '{}'",
-                                env_name,
-                                ws.name
-                            )
-                        })?;
-                    self.db.set_workspace_default_env(ws.id, Some(env.id))?;
-                }
                 println!("Updated workspace: {}", new_name);
                 Ok(())
             }
@@ -459,17 +559,19 @@ mod tests {
     }
 
     #[test]
-    fn test_work_update_default_env() {
+    fn test_coll_update_default_env() {
         let (dir, app) = test_app();
         let db_path = dir.path().join("test.db");
-        let ws = app.db.create_workspace("ws1", "").unwrap();
+        let ws = app.db.create_workspace("ws", "").unwrap();
         app.db.create_environment(ws.id, "staging", "").unwrap();
-        let cli = parse_cli(&["work", "update", "ws1", "--default-env", "staging"]);
+        app.db.create_collection(ws.id, "my-coll", "").unwrap();
+        let cli = parse_cli(&["coll", "update", "my-coll", "-w", "ws", "--default-env", "staging"]);
         app.run(cli).unwrap();
 
         let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
-        let ws = db.get_workspace_by_name("ws1").unwrap().unwrap();
-        assert!(ws.default_env.is_some());
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let coll = db.get_collection_by_name(ws.id, "my-coll").unwrap().unwrap();
+        assert!(coll.default_env.is_some());
     }
 
     #[test]
@@ -482,6 +584,100 @@ mod tests {
 
         let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
         assert!(db.get_workspace_by_name("to-delete").unwrap().is_none());
+    }
+
+    // ── Collection tests ──────────────────────────────────────
+
+    #[test]
+    fn test_coll_create_and_list() {
+        let (_dir, app) = test_app();
+        app.db.create_workspace("ws", "").unwrap();
+        app.db.create_collection(
+            app.db.get_workspace_by_name("ws").unwrap().unwrap().id,
+            "my-coll",
+            "a collection",
+        ).unwrap();
+        let cli = parse_cli(&["coll", "list", "-w", "ws"]);
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_coll_create_via_cli() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        // Don't pass -w; should fall back to "default" workspace
+        let cli = parse_cli(&["coll", "create", "new-coll", "-d", "desc"]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("default").unwrap().unwrap();
+        let coll = db.get_collection_by_name(ws.id, "new-coll").unwrap();
+        assert!(coll.is_some());
+        assert_eq!(coll.unwrap().description, "desc");
+    }
+
+    #[test]
+    fn test_coll_create_empty_name_fails() {
+        let (_dir, app) = test_app();
+        app.db.create_workspace("ws", "").unwrap();
+        let cli = parse_cli(&["coll", "create", "", "-w", "ws"]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn test_coll_show_found() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_collection(ws.id, "my-coll", "desc").unwrap();
+        let cli = parse_cli(&["coll", "show", "my-coll", "-w", "ws"]);
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_coll_show_not_found() {
+        let (_dir, app) = test_app();
+        app.db.create_workspace("ws", "").unwrap();
+        let cli = parse_cli(&["coll", "show", "nonexistent", "-w", "ws"]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_coll_update_name_and_description() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_collection(ws.id, "old-coll", "old desc").unwrap();
+        let cli = parse_cli(&[
+            "coll", "update", "old-coll", "-w", "ws",
+            "--new-name", "new-coll",
+            "--new-description", "new desc",
+        ]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let coll = db.get_collection_by_name(ws.id, "new-coll").unwrap();
+        assert!(coll.is_some());
+        assert_eq!(coll.unwrap().description, "new desc");
+        assert!(db.get_collection_by_name(ws.id, "old-coll").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_coll_delete_force() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_collection(ws.id, "to-delete", "").unwrap();
+        let cli = parse_cli(&["coll", "del", "to-delete", "-w", "ws", "--force"]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        assert!(db.get_collection_by_name(ws.id, "to-delete").unwrap().is_none());
     }
 
     #[test]

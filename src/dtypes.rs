@@ -51,7 +51,6 @@ pub struct Workspace {
     pub id: i64,
     pub name: String,
     pub description: String,
-    pub default_env: Option<i64>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -83,6 +82,7 @@ pub struct Collection {
     pub workspace_id: i64,
     pub name: String,
     pub description: String,
+    pub default_env: Option<i64>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

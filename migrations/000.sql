@@ -14,7 +14,6 @@ create table workspaces (
     id integer primary key autoincrement,
     name text unique not null,
     description text not null default '',
-    default_env integer references environments(id),
     created_at datetime not null default (datetime('subsec')),
     updated_at datetime not null default (datetime('subsec'))
 );
@@ -46,6 +45,7 @@ create table collections (
     workspace_id integer not null references workspaces(id),
     name text not null,
     description text not null default '',
+    default_env integer references environments(id),
     created_at datetime not null default (datetime('subsec')),
     updated_at datetime not null default (datetime('subsec')),
     unique(workspace_id, name)

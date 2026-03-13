@@ -50,16 +50,15 @@ impl DBClient {
 
     pub fn list_workspaces(&self) -> Result<Vec<Workspace>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, description, default_env, created_at, updated_at FROM workspaces ORDER BY name",
+            "SELECT id, name, description, created_at, updated_at FROM workspaces ORDER BY name",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(Workspace {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 description: row.get(2)?,
-                default_env: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -67,16 +66,15 @@ impl DBClient {
 
     pub fn get_workspace_by_id(&self, id: i64) -> Result<Option<Workspace>> {
         match self.conn.query_row(
-            "SELECT id, name, description, default_env, created_at, updated_at FROM workspaces WHERE id = ?1",
+            "SELECT id, name, description, created_at, updated_at FROM workspaces WHERE id = ?1",
             [id],
             |row| {
                 Ok(Workspace {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     description: row.get(2)?,
-                    default_env: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
                 })
             },
         ) {
@@ -88,16 +86,15 @@ impl DBClient {
 
     pub fn get_workspace_by_name(&self, name: &str) -> Result<Option<Workspace>> {
         match self.conn.query_row(
-            "SELECT id, name, description, default_env, created_at, updated_at FROM workspaces WHERE name = ?1",
+            "SELECT id, name, description, created_at, updated_at FROM workspaces WHERE name = ?1",
             [name],
             |row| {
                 Ok(Workspace {
                     id: row.get(0)?,
                     name: row.get(1)?,
                     description: row.get(2)?,
-                    default_env: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
                 })
             },
         ) {
@@ -120,21 +117,6 @@ impl DBClient {
         let rows = self.conn.execute(
             "UPDATE workspaces SET name = ?1, description = ?2, updated_at = datetime('subsec') WHERE id = ?3",
             rusqlite::params![name, description, id],
-        )?;
-        if rows == 0 {
-            return Err(NotFoundError {
-                entity: "workspace",
-                id,
-            }
-            .into());
-        }
-        Ok(())
-    }
-
-    pub fn set_workspace_default_env(&self, id: i64, env_id: Option<i64>) -> Result<()> {
-        let rows = self.conn.execute(
-            "UPDATE workspaces SET default_env = ?1, updated_at = datetime('subsec') WHERE id = ?2",
-            rusqlite::params![env_id, id],
         )?;
         if rows == 0 {
             return Err(NotFoundError {
@@ -386,7 +368,7 @@ impl DBClient {
 
     pub fn list_collections(&self, workspace_id: i64) -> Result<Vec<Collection>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, workspace_id, name, description, created_at, updated_at FROM collections WHERE workspace_id = ?1 ORDER BY name",
+            "SELECT id, workspace_id, name, description, default_env, created_at, updated_at FROM collections WHERE workspace_id = ?1 ORDER BY name",
         )?;
         let rows = stmt.query_map([workspace_id], |row| {
             Ok(Collection {
@@ -394,8 +376,9 @@ impl DBClient {
                 workspace_id: row.get(1)?,
                 name: row.get(2)?,
                 description: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+                default_env: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -403,7 +386,7 @@ impl DBClient {
 
     pub fn get_collection_by_id(&self, id: i64) -> Result<Option<Collection>> {
         match self.conn.query_row(
-            "SELECT id, workspace_id, name, description, created_at, updated_at FROM collections WHERE id = ?1",
+            "SELECT id, workspace_id, name, description, default_env, created_at, updated_at FROM collections WHERE id = ?1",
             [id],
             |row| {
                 Ok(Collection {
@@ -411,8 +394,9 @@ impl DBClient {
                     workspace_id: row.get(1)?,
                     name: row.get(2)?,
                     description: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    default_env: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
                 })
             },
         ) {
@@ -428,7 +412,7 @@ impl DBClient {
         name: &str,
     ) -> Result<Option<Collection>> {
         match self.conn.query_row(
-            "SELECT id, workspace_id, name, description, created_at, updated_at FROM collections WHERE workspace_id = ?1 AND name = ?2",
+            "SELECT id, workspace_id, name, description, default_env, created_at, updated_at FROM collections WHERE workspace_id = ?1 AND name = ?2",
             rusqlite::params![workspace_id, name],
             |row| {
                 Ok(Collection {
@@ -436,8 +420,9 @@ impl DBClient {
                     workspace_id: row.get(1)?,
                     name: row.get(2)?,
                     description: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    default_env: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
                 })
             },
         ) {
@@ -465,6 +450,21 @@ impl DBClient {
         let rows = self.conn.execute(
             "UPDATE collections SET name = ?1, description = ?2, updated_at = datetime('subsec') WHERE id = ?3",
             rusqlite::params![name, description, id],
+        )?;
+        if rows == 0 {
+            return Err(NotFoundError {
+                entity: "collection",
+                id,
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    pub fn set_collection_default_env(&self, id: i64, env_id: Option<i64>) -> Result<()> {
+        let rows = self.conn.execute(
+            "UPDATE collections SET default_env = ?1, updated_at = datetime('subsec') WHERE id = ?2",
+            rusqlite::params![env_id, id],
         )?;
         if rows == 0 {
             return Err(NotFoundError {

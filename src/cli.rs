@@ -200,7 +200,7 @@ pub struct CollCreateArgs {
     pub name: String,
     /// Workspace to create the collection in
     #[arg(short, long)]
-    pub workspace: String,
+    pub workspace: Option<String>,
     /// Description of the collection
     #[arg(short, long)]
     pub description: Option<String>,
@@ -231,6 +231,9 @@ pub struct CollUpdateArgs {
     /// New description
     #[arg(long)]
     pub new_description: Option<String>,
+    /// Set the default environment (by name)
+    #[arg(long)]
+    pub default_env: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -240,6 +243,9 @@ pub struct CollDelArgs {
     /// Workspace name
     #[arg(short, long)]
     pub workspace: Option<String>,
+    /// Skip confirmation prompt
+    #[arg(long)]
+    pub force: bool,
 }
 
 // ── Env ─────────────────────────────────────────────────────────────────
@@ -487,9 +493,6 @@ pub struct WorkUpdateArgs {
     /// New description
     #[arg(long)]
     pub new_description: Option<String>,
-    /// Set the default environment (by name)
-    #[arg(long)]
-    pub default_env: Option<String>,
 }
 
 #[derive(Debug, Args)]
