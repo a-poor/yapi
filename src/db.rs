@@ -321,10 +321,11 @@ impl DBClient {
         name: &str,
         value: &str,
         is_secret: bool,
+        description: &str,
     ) -> Result<Variable> {
         self.conn.execute(
-            "INSERT INTO environment_vars (env_id, name, value, is_secret) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![env_id, name, value, is_secret],
+            "INSERT INTO environment_vars (env_id, name, value, is_secret, description) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![env_id, name, value, is_secret, description],
         )?;
         self.get_environment_var_by_id(self.conn.last_insert_rowid())?
             .ok_or_else(|| anyhow::anyhow!("failed to retrieve newly created environment var"))
@@ -336,10 +337,11 @@ impl DBClient {
         name: &str,
         value: &str,
         is_secret: bool,
+        description: &str,
     ) -> Result<()> {
         let rows = self.conn.execute(
-            "UPDATE environment_vars SET name = ?1, value = ?2, is_secret = ?3, updated_at = datetime('subsec') WHERE id = ?4",
-            rusqlite::params![name, value, is_secret, id],
+            "UPDATE environment_vars SET name = ?1, value = ?2, is_secret = ?3, description = ?4, updated_at = datetime('subsec') WHERE id = ?5",
+            rusqlite::params![name, value, is_secret, description, id],
         )?;
         if rows == 0 {
             return Err(NotFoundError {

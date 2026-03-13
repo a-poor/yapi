@@ -288,7 +288,7 @@ pub struct EnvCreateArgs {
     pub name: String,
     /// Workspace to create the environment in
     #[arg(short, long)]
-    pub workspace: String,
+    pub workspace: Option<String>,
     /// Description of the environment
     #[arg(short, long)]
     pub description: Option<String>,
@@ -328,6 +328,9 @@ pub struct EnvDelArgs {
     /// Workspace name
     #[arg(short, long)]
     pub workspace: Option<String>,
+    /// Skip confirmation prompt
+    #[arg(long)]
+    pub force: bool,
 }
 
 // ── Env Vars ────────────────────────────────────────────────────────────

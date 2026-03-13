@@ -219,22 +219,244 @@ impl App {
 
     fn run_env(self, args: EnvArgs) -> Result<()> {
         match args.cmd {
-            EnvCmds::List(_) => todo!("env list"),
-            EnvCmds::Create(_) => todo!("env create"),
-            EnvCmds::Show(_) => todo!("env show"),
-            EnvCmds::Update(_) => todo!("env update"),
-            EnvCmds::Del(_) => todo!("env del"),
+            EnvCmds::List(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let envs = self.db.list_environments(ws.id)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&envs)?);
+                } else {
+                    for e in &envs {
+                        println!("{}\t{}", e.name, e.description);
+                    }
+                }
+                Ok(())
+            }
+            EnvCmds::Create(args) => {
+                if args.name.is_empty() {
+                    anyhow::bail!("environment name must not be empty");
+                }
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let desc = args.description.as_deref().unwrap_or("");
+                let env = self.db.create_environment(ws.id, &args.name, desc)?;
+                println!("Created environment: {}", env.name);
+                Ok(())
+            }
+            EnvCmds::Show(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let env = self
+                    .db
+                    .get_environment_by_name(ws.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "environment '{}' not found in workspace '{}'",
+                            args.name,
+                            ws.name
+                        )
+                    })?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&env)?);
+                } else {
+                    println!("Name:        {}", env.name);
+                    println!("Description: {}", env.description);
+                    println!("Workspace:   {}", ws.name);
+                    println!("Created:     {}", env.created_at);
+                    println!("Updated:     {}", env.updated_at);
+                }
+                Ok(())
+            }
+            EnvCmds::Update(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let env = self
+                    .db
+                    .get_environment_by_name(ws.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "environment '{}' not found in workspace '{}'",
+                            args.name,
+                            ws.name
+                        )
+                    })?;
+                let new_name = args.new_name.as_deref().unwrap_or(&env.name);
+                let new_desc = args.new_description.as_deref().unwrap_or(&env.description);
+                self.db.update_environment(env.id, new_name, new_desc)?;
+                println!("Updated environment: {}", new_name);
+                Ok(())
+            }
+            EnvCmds::Del(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let env = self
+                    .db
+                    .get_environment_by_name(ws.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "environment '{}' not found in workspace '{}'",
+                            args.name,
+                            ws.name
+                        )
+                    })?;
+                if !args.force {
+                    let vars = self.db.list_environment_vars(env.id)?.len();
+                    let confirmed = inquire::Confirm::new(&format!(
+                        "Permanently delete environment '{}' and all its contents ({} variable(s))?",
+                        env.name, vars
+                    ))
+                    .with_default(false)
+                    .prompt()?;
+                    if !confirmed {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                }
+                self.db.delete_environment(env.id)?;
+                println!("Deleted environment: {}", env.name);
+                Ok(())
+            }
             EnvCmds::Vars(vars) => self.run_env_vars(vars),
         }
     }
 
     fn run_env_vars(self, args: EnvVarArgs) -> Result<()> {
         match args.cmd {
-            EnvVarCmds::List(_) => todo!("env vars list"),
-            EnvVarCmds::Create(_) => todo!("env vars create"),
-            EnvVarCmds::Show(_) => todo!("env vars show"),
-            EnvVarCmds::Update(_) => todo!("env vars update"),
-            EnvVarCmds::Del(_) => todo!("env vars del"),
+            EnvVarCmds::List(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let env = self
+                    .db
+                    .get_environment_by_name(ws.id, &args.env)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "environment '{}' not found in workspace '{}'",
+                            args.env,
+                            ws.name
+                        )
+                    })?;
+                let vars = self.db.list_environment_vars(env.id)?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&vars)?);
+                } else {
+                    for v in &vars {
+                        let display_val = if v.is_secret { "********" } else { &v.value };
+                        println!("{}\t{}", v.name, display_val);
+                    }
+                }
+                Ok(())
+            }
+            EnvVarCmds::Create(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let env = self
+                    .db
+                    .get_environment_by_name(ws.id, &args.env)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "environment '{}' not found in workspace '{}'",
+                            args.env,
+                            ws.name
+                        )
+                    })?;
+                if args.name.is_empty() {
+                    anyhow::bail!("variable name must not be empty");
+                }
+                let desc = args.description.as_deref().unwrap_or("");
+                let var = self.db.create_environment_var(
+                    env.id,
+                    &args.name,
+                    &args.value,
+                    args.secret,
+                    desc,
+                )?;
+                println!("Created variable: {}", var.name);
+                Ok(())
+            }
+            EnvVarCmds::Show(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let env = self
+                    .db
+                    .get_environment_by_name(ws.id, &args.env)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "environment '{}' not found in workspace '{}'",
+                            args.env,
+                            ws.name
+                        )
+                    })?;
+                let var = self
+                    .db
+                    .get_environment_var_by_name(env.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "variable '{}' not found in environment '{}'",
+                            args.name,
+                            env.name
+                        )
+                    })?;
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&var)?);
+                } else {
+                    let display_val = if var.is_secret { "********" } else { &var.value };
+                    println!("Name:        {}", var.name);
+                    println!("Value:       {}", display_val);
+                    println!("Description: {}", var.description);
+                    println!("Secret:      {}", var.is_secret);
+                    println!("Created:     {}", var.created_at);
+                    println!("Updated:     {}", var.updated_at);
+                }
+                Ok(())
+            }
+            EnvVarCmds::Update(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let env = self
+                    .db
+                    .get_environment_by_name(ws.id, &args.env)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "environment '{}' not found in workspace '{}'",
+                            args.env,
+                            ws.name
+                        )
+                    })?;
+                let var = self
+                    .db
+                    .get_environment_var_by_name(env.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "variable '{}' not found in environment '{}'",
+                            args.name,
+                            env.name
+                        )
+                    })?;
+                let new_name = args.new_name.as_deref().unwrap_or(&var.name);
+                let new_value = args.new_value.as_deref().unwrap_or(&var.value);
+                let new_secret = args.secret.unwrap_or(var.is_secret);
+                let new_desc = args.new_description.as_deref().unwrap_or(&var.description);
+                self.db.update_environment_var(var.id, new_name, new_value, new_secret, new_desc)?;
+                println!("Updated variable: {}", new_name);
+                Ok(())
+            }
+            EnvVarCmds::Del(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let env = self
+                    .db
+                    .get_environment_by_name(ws.id, &args.env)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "environment '{}' not found in workspace '{}'",
+                            args.env,
+                            ws.name
+                        )
+                    })?;
+                let var = self
+                    .db
+                    .get_environment_var_by_name(env.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "variable '{}' not found in environment '{}'",
+                            args.name,
+                            env.name
+                        )
+                    })?;
+                self.db.delete_environment_var(var.id)?;
+                println!("Deleted variable: {}", var.name);
+                Ok(())
+            }
         }
     }
 
@@ -685,7 +907,7 @@ mod tests {
         let (_dir, app) = test_app();
         let ws = app.db.create_workspace("ws", "").unwrap();
         let env = app.db.create_environment(ws.id, "dev", "").unwrap();
-        app.db.create_environment_var(env.id, "KEY", "val", false).unwrap();
+        app.db.create_environment_var(env.id, "KEY", "val", false, "").unwrap();
         let coll = app.db.create_collection(ws.id, "coll", "").unwrap();
         app.db.create_collection_var(coll.id, "CV", "v", false).unwrap();
         let req = app.db.create_request(coll.id, "r1", "GET", "http://x", None).unwrap();
@@ -726,6 +948,188 @@ mod tests {
         let preserved = app.db.get_history_by_id(hist.id).unwrap();
         assert!(preserved.is_some(), "history row should still exist");
         assert_eq!(preserved.unwrap().req_id, None, "req_id should be NULL after cascade");
+    }
+
+    // ── Environment tests ──────────────────────────────────────
+
+    #[test]
+    fn test_env_create_and_list() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_environment(ws.id, "staging", "Staging env").unwrap();
+        let cli = parse_cli(&["env", "list", "-w", "ws"]);
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_env_create_via_cli() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        // Don't pass -w; should fall back to "default" workspace
+        let cli = parse_cli(&["env", "create", "staging", "-d", "Staging env"]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("default").unwrap().unwrap();
+        let env = db.get_environment_by_name(ws.id, "staging").unwrap();
+        assert!(env.is_some());
+        assert_eq!(env.unwrap().description, "Staging env");
+    }
+
+    #[test]
+    fn test_env_create_empty_name_fails() {
+        let (_dir, app) = test_app();
+        let cli = parse_cli(&["env", "create", ""]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn test_env_show_found() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_environment(ws.id, "staging", "desc").unwrap();
+        let cli = parse_cli(&["env", "show", "staging", "-w", "ws"]);
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_env_show_not_found() {
+        let (_dir, app) = test_app();
+        app.db.create_workspace("ws", "").unwrap();
+        let cli = parse_cli(&["env", "show", "nonexistent", "-w", "ws"]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_env_update_name_and_description() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_environment(ws.id, "old-env", "old desc").unwrap();
+        let cli = parse_cli(&[
+            "env", "update", "old-env", "-w", "ws",
+            "--new-name", "new-env",
+            "--new-description", "new desc",
+        ]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let env = db.get_environment_by_name(ws.id, "new-env").unwrap();
+        assert!(env.is_some());
+        assert_eq!(env.unwrap().description, "new desc");
+        assert!(db.get_environment_by_name(ws.id, "old-env").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_env_delete_force() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_environment(ws.id, "to-delete", "").unwrap();
+        let cli = parse_cli(&["env", "del", "to-delete", "-w", "ws", "--force"]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        assert!(db.get_environment_by_name(ws.id, "to-delete").unwrap().is_none());
+    }
+
+    // ── Environment variable tests ──────────────────────────────
+
+    #[test]
+    fn test_env_var_create_and_list() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let env = app.db.create_environment(ws.id, "dev", "").unwrap();
+        app.db.create_environment_var(env.id, "API_KEY", "secret", true, "An API key").unwrap();
+        let cli = parse_cli(&["env", "vars", "list", "-e", "dev", "-w", "ws"]);
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_env_var_create_via_cli() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_environment(ws.id, "dev", "").unwrap();
+        let cli = parse_cli(&[
+            "env", "vars", "create", "MY_VAR", "my-value",
+            "-e", "dev", "-w", "ws", "--secret", "-d", "A desc",
+        ]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let env = db.get_environment_by_name(ws.id, "dev").unwrap().unwrap();
+        let var = db.get_environment_var_by_name(env.id, "MY_VAR").unwrap();
+        assert!(var.is_some());
+        let var = var.unwrap();
+        assert_eq!(var.value, "my-value");
+        assert!(var.is_secret);
+        assert_eq!(var.description, "A desc");
+    }
+
+    #[test]
+    fn test_env_var_show_found() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let env = app.db.create_environment(ws.id, "dev", "").unwrap();
+        app.db.create_environment_var(env.id, "KEY", "val", false, "").unwrap();
+        let cli = parse_cli(&["env", "vars", "show", "KEY", "-e", "dev", "-w", "ws"]);
+        app.run(cli).unwrap();
+    }
+
+    #[test]
+    fn test_env_var_show_not_found() {
+        let (_dir, app) = test_app();
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        app.db.create_environment(ws.id, "dev", "").unwrap();
+        let cli = parse_cli(&["env", "vars", "show", "NOPE", "-e", "dev", "-w", "ws"]);
+        let result = app.run(cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_env_var_update_value() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let env = app.db.create_environment(ws.id, "dev", "").unwrap();
+        app.db.create_environment_var(env.id, "KEY", "old-val", false, "old desc").unwrap();
+        let cli = parse_cli(&[
+            "env", "vars", "update", "KEY", "-e", "dev", "-w", "ws",
+            "--new-value", "new-val", "--new-description", "new desc",
+        ]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let env = db.get_environment_by_name(ws.id, "dev").unwrap().unwrap();
+        let var = db.get_environment_var_by_name(env.id, "KEY").unwrap().unwrap();
+        assert_eq!(var.value, "new-val");
+        assert_eq!(var.description, "new desc");
+    }
+
+    #[test]
+    fn test_env_var_delete() {
+        let (dir, app) = test_app();
+        let db_path = dir.path().join("test.db");
+        let ws = app.db.create_workspace("ws", "").unwrap();
+        let env = app.db.create_environment(ws.id, "dev", "").unwrap();
+        app.db.create_environment_var(env.id, "KEY", "val", false, "").unwrap();
+        let cli = parse_cli(&["env", "vars", "del", "KEY", "-e", "dev", "-w", "ws"]);
+        app.run(cli).unwrap();
+
+        let db = DBClient::new(Some(db_path.to_str().unwrap())).unwrap();
+        let ws = db.get_workspace_by_name("ws").unwrap().unwrap();
+        let env = db.get_environment_by_name(ws.id, "dev").unwrap().unwrap();
+        assert!(db.get_environment_var_by_name(env.id, "KEY").unwrap().is_none());
     }
 
     #[test]
