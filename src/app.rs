@@ -871,7 +871,14 @@ impl App {
                                 .to_string(),
                         ),
                     }),
-                    ..AppConfig::default()
+                    defaults: Some(conf::DefaultsConfig {
+                        workspace: Some("default".into()),
+                        collection: Some("default".into()),
+                        environment: None,
+                    }),
+                    history: Some(conf::HistoryConfig {
+                        retention_days: None,
+                    }),
                 };
                 conf::save(&config)?;
                 println!("Created config file: {}", config_path.display());
