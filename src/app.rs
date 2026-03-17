@@ -389,6 +389,104 @@ impl App {
                     }
                 }
             }
+            ReqCmds::Vars(args) => {
+                let ws = self.resolve_workspace(args.workspace.as_deref())?;
+                let coll = self.resolve_collection(ws.id, args.collection.as_deref())?;
+                // Validate request exists
+                self.db
+                    .get_request_by_name(coll.id, &args.name)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "request '{}' not found in collection '{}'",
+                            args.name,
+                            coll.name
+                        )
+                    })?;
+
+                // Resolve environment (same logic as req run)
+                let (env_name, env_vars) = if let Some(env_name) = &args.env {
+                    let env = self
+                        .db
+                        .get_environment_by_name(ws.id, env_name)?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("environment '{}' not found", env_name)
+                        })?;
+                    (Some(env_name.clone()), self.db.list_environment_vars(env.id)?)
+                } else if let Some(env_id) = coll.default_env {
+                    match self.db.get_environment_by_id(env_id)? {
+                        Some(env) => {
+                            let name = env.name.clone();
+                            (Some(name), self.db.list_environment_vars(env.id)?)
+                        }
+                        None => (None, vec![]),
+                    }
+                } else {
+                    (None, vec![])
+                };
+
+                let coll_vars = self.db.list_collection_vars(coll.id)?;
+
+                // Build a set of env var names for override detection
+                let env_names: std::collections::HashSet<&str> =
+                    env_vars.iter().map(|v| v.name.as_str()).collect();
+
+                // Build display entries
+                struct VarEntry {
+                    name: String,
+                    value: String,
+                    source: String,
+                    overridden: bool,
+                }
+
+                let mut entries: Vec<VarEntry> = Vec::new();
+
+                for v in &coll_vars {
+                    let overridden = env_names.contains(v.name.as_str());
+                    entries.push(VarEntry {
+                        name: v.name.clone(),
+                        value: v.value.clone(),
+                        source: "collection".to_string(),
+                        overridden,
+                    });
+                }
+                let source_label = match &env_name {
+                    Some(n) => format!("env:{}", n),
+                    None => "environment".to_string(),
+                };
+                for v in &env_vars {
+                    entries.push(VarEntry {
+                        name: v.name.clone(),
+                        value: v.value.clone(),
+                        source: source_label.clone(),
+                        overridden: false,
+                    });
+                }
+
+                if args.json {
+                    let json_entries: Vec<serde_json::Value> = entries
+                        .iter()
+                        .map(|e| {
+                            serde_json::json!({
+                                "name": e.name,
+                                "value": e.value,
+                                "source": e.source,
+                                "overridden": e.overridden,
+                            })
+                        })
+                        .collect();
+                    println!("{}", serde_json::to_string_pretty(&json_entries)?);
+                } else {
+                    for e in &entries {
+                        let display_val = if e.overridden {
+                            "(overridden)".to_string()
+                        } else {
+                            e.value.clone()
+                        };
+                        println!("{}\t{}\t{}", e.name, e.source, display_val);
+                    }
+                }
+                Ok(())
+            }
         }
     }
 

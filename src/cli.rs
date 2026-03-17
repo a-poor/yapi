@@ -55,6 +55,8 @@ pub enum ReqCmds {
     Update(ReqUpdateArgs),
     /// Delete a request from a collection
     Del(ReqDelArgs),
+    /// Show resolved variables for a request
+    Vars(ReqVarsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -190,6 +192,24 @@ pub struct ReqDelArgs {
     /// Skip confirmation prompt
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ReqVarsArgs {
+    /// Name of the request
+    pub name: String,
+    /// Collection containing the request
+    #[arg(short, long)]
+    pub collection: Option<String>,
+    /// Workspace name
+    #[arg(short, long)]
+    pub workspace: Option<String>,
+    /// Environment to use for variable substitution
+    #[arg(short, long)]
+    pub env: Option<String>,
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
 }
 
 // ── Coll ────────────────────────────────────────────────────────────────
